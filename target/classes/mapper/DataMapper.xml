@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.quickform.api.mapper.DataMapper">
+
+  <select id="createRecord" resultType="java.util.UUID">
+    INSERT INTO data_record (dataset_id, data, status, created_by, updated_by)
+    VALUES (#{datasetId}, #{dataJson}::jsonb, #{status}, #{operator}, #{operator})
+    RETURNING id
+  </select>
+
+  <update id="updateRecord">
+    UPDATE data_record
+    SET data = #{dataJson}::jsonb,
+        status = COALESCE(#{status}, status),
+        updated_at = NOW(),
+        updated_by = #{operator}
+    WHERE id = #{id} AND dataset_id = #{datasetId}
+  </update>
+
+  <delete id="deleteRecord">
+    DELETE FROM data_record WHERE id = #{id} AND dataset_id = #{datasetId}
+  </delete>
+
+  <select id="query" resultType="map">
+    ${sql}
+  </select>
+
+  <select id="count" resultType="long">
+    ${sql}
+  </select>
+
+</mapper>
