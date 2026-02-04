@@ -21,31 +21,31 @@ public class WorkflowController {
         this.workflowService = workflowService;
     }
 
-    @PostMapping("/{datasetCode}/{id}/submit")
+    @PostMapping("/{pageCode}/{id}/submit")
     public ApiResponse<Integer> submit(
-        @PathVariable String datasetCode,
+        @PathVariable String pageCode,
         @PathVariable UUID id,
         @RequestBody(required = false) WorkflowActionRequest request
     ) {
-        return ApiResponse.ok(workflowService.submit(datasetCode, id, request));
+        return ApiResponse.ok(workflowService.submit(pageCode, id, request));
     }
 
-    @PostMapping("/{datasetCode}/{id}/approve")
+    @PostMapping("/{pageCode}/{id}/approve")
     public ApiResponse<Integer> approve(
-        @PathVariable String datasetCode,
+        @PathVariable String pageCode,
         @PathVariable UUID id,
         @RequestBody(required = false) WorkflowActionRequest request
     ) {
-        return ApiResponse.ok(workflowService.approve(datasetCode, id, request));
+        return ApiResponse.ok(workflowService.approve(pageCode, id, request));
     }
 
-    @PostMapping("/{datasetCode}/{id}/reject")
+    @PostMapping("/{pageCode}/{id}/reject")
     public ApiResponse<Integer> reject(
-        @PathVariable String datasetCode,
+        @PathVariable String pageCode,
         @PathVariable UUID id,
         @RequestBody(required = false) WorkflowActionRequest request
     ) {
-        return ApiResponse.ok(workflowService.reject(datasetCode, id, request));
+        return ApiResponse.ok(workflowService.reject(pageCode, id, request));
     }
 
     @PostMapping("/tasks")

@@ -19,36 +19,36 @@ public class DataController {
         this.dataService = dataService;
     }
 
-    @PostMapping("/{datasetCode}/query")
+    @PostMapping("/{pageCode}/query")
     public ApiResponse<PageResult<Map<String, Object>>> query(
-        @PathVariable String datasetCode,
+        @PathVariable String pageCode,
         @RequestBody(required = false) DataQueryRequest request
     ) {
-        return ApiResponse.ok(dataService.query(datasetCode, request));
+        return ApiResponse.ok(dataService.query(pageCode, request));
     }
 
-    @PostMapping("/{datasetCode}/create")
+    @PostMapping("/{pageCode}/create")
     public ApiResponse<UUID> create(
-        @PathVariable String datasetCode,
+        @PathVariable String pageCode,
         @RequestBody DataWriteRequest request
     ) {
-        return ApiResponse.ok(dataService.create(datasetCode, request));
+        return ApiResponse.ok(dataService.create(pageCode, request));
     }
 
-    @PostMapping("/{datasetCode}/{id}/update")
+    @PostMapping("/{pageCode}/{id}/update")
     public ApiResponse<Integer> update(
-        @PathVariable String datasetCode,
+        @PathVariable String pageCode,
         @PathVariable UUID id,
         @RequestBody DataWriteRequest request
     ) {
-        return ApiResponse.ok(dataService.update(datasetCode, id, request));
+        return ApiResponse.ok(dataService.update(pageCode, id, request));
     }
 
-    @PostMapping("/{datasetCode}/{id}/delete")
+    @PostMapping("/{pageCode}/{id}/delete")
     public ApiResponse<Integer> delete(
-        @PathVariable String datasetCode,
+        @PathVariable String pageCode,
         @PathVariable UUID id
     ) {
-        return ApiResponse.ok(dataService.delete(datasetCode, id));
+        return ApiResponse.ok(dataService.delete(pageCode, id));
     }
 }

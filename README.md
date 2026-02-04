@@ -1,95 +1,70 @@
 # QuickForm Backend (Spring Boot + MyBatis XML)
 
-All APIs use POST.
+后端只存两类内容：
+- 页面 JSONSchema（`page` 表，前端直接保存/覆盖）
+- 业务数据 JSONB（`data_record` 表）
+
+工作流与报表与 `page_code` 绑定。
 
 ## Run
 
-Set environment variables (or edit `application.yml`):
+环境变量（或修改 `application.yml`）：
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`
 
-Start:
+启动：
 
 ```bash
 mvn spring-boot:run
 ```
 
-`schema.sql` will auto-create tables on startup.
+`schema.sql` 会在启动时自动建表。
 
-## API (POST)
+## API（全部 POST）
 
-### Meta
-- `/meta/datasets/list`
-- `/meta/datasets/get`
-- `/meta/datasets/create`
-- `/meta/fields/list`
-- `/meta/fields/create`
-- `/meta/fields/update`
-- `/meta/fields/delete`
+### Page
+- `/page/list`
+- `/page/get`
+- `/page/save`
+- `/page/delete`
 
 ### Data
-- `/data/{datasetCode}/query`
-- `/data/{datasetCode}/create`
-- `/data/{datasetCode}/{id}/update`
-- `/data/{datasetCode}/{id}/delete`
+- `/data/{pageCode}/query`
+- `/data/{pageCode}/create`
+- `/data/{pageCode}/{id}/update`
+- `/data/{pageCode}/{id}/delete`
 
 ### Workflow
-- `/workflow/{datasetCode}/{id}/submit`
-- `/workflow/{datasetCode}/{id}/approve`
-- `/workflow/{datasetCode}/{id}/reject`
-- `/workflow/tasks`
 - `/workflow/config/get`
 - `/workflow/config/save`
+- `/workflow/{pageCode}/{id}/submit`
+- `/workflow/{pageCode}/{id}/approve`
+- `/workflow/{pageCode}/{id}/reject`
+- `/workflow/tasks`
 
 ### Report
 - `/report/run`
 
 ## Example Payloads
 
-### Create Dataset
+### Page Save
 
 ```json
 {
-  "name": "Customer",
-  "code": "customer",
-  "primaryKey": "id",
-  "options": {
-    "icon": "user"
+  "pageCode": "customer",
+  "name": "客户管理",
+  "schema": {
+    "componentName": "Page",
+    "props": {},
+    "children": []
   }
 }
 ```
 
-### Create Field
-
-```json
-{
-  "datasetCode": "customer",
-  "name": "Name",
-  "code": "name",
-  "type": "text",
-  "required": true,
-  "orderNo": 1
-}
-```
-
-### Create Data
-
-```json
-{
-  "status": "draft",
-  "operator": "alice",
-  "data": {
-    "name": "张三",
-    "age": 30
-  }
-}
-```
-
-### Query Data
+### Query Data (AND + OR)
 
 ```json
 {
   "filters": [
-    {"field": "name", "op": "like", "value": "张"},
     {"field": "age", "op": "gte", "value": 18}
   ],
   "orFilters": [
@@ -108,7 +83,7 @@ mvn spring-boot:run
 
 ```json
 {
-  "datasetCode": "customer",
+  "pageCode": "customer",
   "name": "customer-approval",
   "config": {
     "nodes": [
@@ -123,9 +98,9 @@ mvn spring-boot:run
 
 ```json
 {
-  "sql": "SELECT data->>'name' AS name, COUNT(1) AS cnt FROM data_record WHERE dataset_id = :datasetId GROUP BY name",
-  "params": {"datasetId": 1}
+  "sql": "SELECT data->>'name' AS name, COUNT(1) AS cnt FROM data_record WHERE page_code = :pageCode GROUP BY name",
+  "params": {"pageCode": "customer"}
 }
 ```
 
-说明：报表 SQL 支持 `:param` 命名参数（会自动转换为 MyBatis 绑定）。
+说明：报表 SQL 支持 `:param` 命名参数（自动转换为 MyBatis 绑定）。

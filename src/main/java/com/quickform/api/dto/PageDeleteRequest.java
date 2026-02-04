@@ -1,6 +1,9 @@
 package com.quickform.api.dto;
 
-public class WorkflowConfigGetRequest {
+import jakarta.validation.constraints.NotBlank;
+
+public class PageDeleteRequest {
+    @NotBlank
     private String pageCode;
 
     public String getPageCode() {

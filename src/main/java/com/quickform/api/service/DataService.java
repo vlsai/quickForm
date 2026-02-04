@@ -3,35 +3,29 @@ package com.quickform.api.service;
 import com.quickform.api.dto.*;
 import com.quickform.api.exception.BadRequestException;
 import com.quickform.api.exception.NotFoundException;
-import com.quickform.api.model.DatasetInfo;
-import com.quickform.api.model.FieldInfo;
 import com.quickform.api.mapper.DataMapper;
-import com.quickform.api.mapper.MetaMapper;
+import com.quickform.api.mapper.PageMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.regex.Pattern;
 
 @Service
 public class DataService {
     private final DataMapper dataMapper;
-    private final MetaMapper metaMapper;
+    private final PageMapper pageMapper;
     private final JsonHelper jsonHelper;
+    private static final Pattern FIELD_PATTERN = Pattern.compile("^[a-zA-Z0-9_]+$");
 
-    public DataService(DataMapper dataMapper, MetaMapper metaMapper, JsonHelper jsonHelper) {
+    public DataService(DataMapper dataMapper, PageMapper pageMapper, JsonHelper jsonHelper) {
         this.dataMapper = dataMapper;
-        this.metaMapper = metaMapper;
+        this.pageMapper = pageMapper;
         this.jsonHelper = jsonHelper;
     }
 
-    public PageResult<Map<String, Object>> query(String datasetCode, DataQueryRequest request) {
-        DatasetInfo dataset = getDataset(datasetCode);
-        List<FieldInfo> fields = metaMapper.listFieldInfos(dataset.getId());
-        Map<String, String> typeMap = new HashMap<>();
-        for (FieldInfo field : fields) {
-            typeMap.put(field.getCode(), field.getType());
-        }
-
-        QuerySql querySql = buildQuerySql(dataset.getId(), typeMap, request);
+    public PageResult<Map<String, Object>> query(String pageCode, DataQueryRequest request) {
+        ensurePageExists(pageCode);
+        QuerySql querySql = buildQuerySql(pageCode, request);
         long total = dataMapper.count(querySql.countSql, querySql.params);
         List<Map<String, Object>> rows = dataMapper.query(querySql.pageSql, querySql.params);
 
@@ -53,52 +47,45 @@ public class DataService {
         return new PageResult<>(items, total, page, pageSize);
     }
 
-    public UUID create(String datasetCode, DataWriteRequest request) {
-        DatasetInfo dataset = getDataset(datasetCode);
+    public UUID create(String pageCode, DataWriteRequest request) {
+        ensurePageExists(pageCode);
         if (request == null || request.getData() == null) {
             throw new BadRequestException("data required");
         }
         String dataJson = jsonHelper.toJson(request.getData());
         String status = request.getStatus() == null ? "draft" : request.getStatus();
-        return dataMapper.createRecord(dataset.getId(), dataJson, status, request.getOperator());
+        return dataMapper.createRecord(pageCode, dataJson, status, request.getOperator());
     }
 
-    public int update(String datasetCode, UUID id, DataWriteRequest request) {
-        DatasetInfo dataset = getDataset(datasetCode);
+    public int update(String pageCode, UUID id, DataWriteRequest request) {
+        ensurePageExists(pageCode);
         if (request == null || request.getData() == null) {
             throw new BadRequestException("data required");
         }
         String dataJson = jsonHelper.toJson(request.getData());
-        return dataMapper.updateRecord(id, dataset.getId(), dataJson, request.getStatus(), request.getOperator());
+        return dataMapper.updateRecord(id, pageCode, dataJson, request.getStatus(), request.getOperator());
     }
 
-    public int delete(String datasetCode, UUID id) {
-        DatasetInfo dataset = getDataset(datasetCode);
-        return dataMapper.deleteRecord(id, dataset.getId());
+    public int delete(String pageCode, UUID id) {
+        ensurePageExists(pageCode);
+        return dataMapper.deleteRecord(id, pageCode);
     }
 
-    private DatasetInfo getDataset(String datasetCode) {
-        if (datasetCode == null || datasetCode.isBlank()) {
-            throw new BadRequestException("dataset code required");
+    private void ensurePageExists(String pageCode) {
+        if (pageCode == null || pageCode.isBlank()) {
+            throw new BadRequestException("page code required");
         }
-        Map<String, Object> datasetRow = metaMapper.getDatasetByCode(datasetCode);
-        DatasetInfo dataset = null;
-        if (datasetRow != null) {
-            long id = ((Number) datasetRow.get("id")).longValue();
-            String primaryKey = datasetRow.get("primary_key") == null ? "id" : datasetRow.get("primary_key").toString();
-            dataset = new DatasetInfo(id, datasetCode, primaryKey);
+        Map<String, Object> page = pageMapper.getPageByCode(pageCode);
+        if (page == null) {
+            throw new NotFoundException("page not found");
         }
-        if (dataset == null) {
-            throw new NotFoundException("dataset not found");
-        }
-        return dataset;
     }
 
-    private QuerySql buildQuerySql(long datasetId, Map<String, String> typeMap, DataQueryRequest request) {
+    private QuerySql buildQuerySql(String pageCode, DataQueryRequest request) {
         ParamBuilder paramBuilder = new ParamBuilder();
         List<String> where = new ArrayList<>();
 
-        where.add("dataset_id = " + paramBuilder.add(datasetId));
+        where.add("page_code = " + paramBuilder.add(pageCode));
 
         if (request != null && request.getKeywords() != null && !request.getKeywords().isBlank()) {
             where.add("data::text ILIKE " + paramBuilder.add("%" + request.getKeywords().trim() + "%"));
@@ -106,7 +93,7 @@ public class DataService {
 
         if (request != null && request.getFilters() != null) {
             for (Filter filter : request.getFilters()) {
-                String condition = buildCondition(filter, typeMap, paramBuilder);
+                String condition = buildCondition(filter, paramBuilder);
                 if (condition != null) {
                     where.add(condition);
                 }
@@ -116,7 +103,7 @@ public class DataService {
         if (request != null && request.getOrFilters() != null && !request.getOrFilters().isEmpty()) {
             List<String> orParts = new ArrayList<>();
             for (Filter filter : request.getOrFilters()) {
-                String condition = buildCondition(filter, typeMap, paramBuilder);
+                String condition = buildCondition(filter, paramBuilder);
                 if (condition != null) {
                     orParts.add(condition);
                 }
@@ -140,7 +127,7 @@ public class DataService {
                 if (!order.equals("ASC") && !order.equals("DESC")) {
                     order = "ASC";
                 }
-                String expr = resolveExpr(sort.getField(), typeMap, "sort");
+                String expr = resolveExpr(sort.getField());
                 if (expr == null) {
                     continue;
                 }
@@ -166,23 +153,7 @@ public class DataService {
         return new QuerySql(countSql, pageSql, paramBuilder.params, page, pageSize);
     }
 
-    private String fieldExpr(String field, String type, String mode) {
-        String safeField = field.replace("'", "");
-        String base = "data ->> '" + safeField + "'";
-        if (type == null) {
-            return base;
-        }
-        String t = type.toLowerCase();
-        if (t.contains("number") || t.contains("int") || t.contains("decimal")) {
-            return "NULLIF(" + base + ", '')::numeric";
-        }
-        if (t.contains("date") || t.contains("time")) {
-            return "NULLIF(" + base + ", '')::timestamp";
-        }
-        return base;
-    }
-
-    private String buildCondition(Filter filter, Map<String, String> typeMap, ParamBuilder paramBuilder) {
+    private String buildCondition(Filter filter, ParamBuilder paramBuilder) {
         if (filter == null || filter.getField() == null || filter.getField().isBlank()) {
             return null;
         }
@@ -190,7 +161,7 @@ public class DataService {
         String field = filter.getField();
 
         if ("contains".equals(op)) {
-            if (!typeMap.containsKey(field)) {
+            if (!isSafeField(field)) {
                 return null;
             }
             String fieldParam = paramBuilder.add(field);
@@ -198,25 +169,35 @@ public class DataService {
             return "data -> " + fieldParam + " @> " + valueParam + "::jsonb";
         }
 
-        String expr = resolveExpr(field, typeMap, op);
+        String expr = resolveExpr(field);
         if (expr == null) {
             return null;
         }
+
+        boolean numeric = filter.getValue() instanceof Number;
+        boolean boolVal = filter.getValue() instanceof Boolean;
+        String typedExpr = expr;
+        if (numeric) {
+            typedExpr = "NULLIF(" + expr + ", '')::numeric";
+        } else if (boolVal) {
+            typedExpr = "NULLIF(" + expr + ", '')::boolean";
+        }
+
         switch (op) {
             case "eq":
-                return expr + " = " + paramBuilder.add(filter.getValue());
+                return typedExpr + " = " + paramBuilder.add(filter.getValue());
             case "ne":
-                return expr + " <> " + paramBuilder.add(filter.getValue());
+                return typedExpr + " <> " + paramBuilder.add(filter.getValue());
             case "like":
                 return expr + " ILIKE " + paramBuilder.add("%" + String.valueOf(filter.getValue()) + "%");
             case "gt":
-                return expr + " > " + paramBuilder.add(filter.getValue());
+                return typedExpr + " > " + paramBuilder.add(filter.getValue());
             case "gte":
-                return expr + " >= " + paramBuilder.add(filter.getValue());
+                return typedExpr + " >= " + paramBuilder.add(filter.getValue());
             case "lt":
-                return expr + " < " + paramBuilder.add(filter.getValue());
+                return typedExpr + " < " + paramBuilder.add(filter.getValue());
             case "lte":
-                return expr + " <= " + paramBuilder.add(filter.getValue());
+                return typedExpr + " <= " + paramBuilder.add(filter.getValue());
             case "in":
                 if (filter.getValue() instanceof Collection) {
                     Collection<?> values = (Collection<?>) filter.getValue();
@@ -225,16 +206,16 @@ public class DataService {
                         for (Object value : values) {
                             placeholders.add(paramBuilder.add(value));
                         }
-                        return expr + " IN (" + String.join(",", placeholders) + ")";
+                        return typedExpr + " IN (" + String.join(",", placeholders) + ")";
                     }
                 }
                 return null;
             default:
-                return expr + " = " + paramBuilder.add(filter.getValue());
+                return typedExpr + " = " + paramBuilder.add(filter.getValue());
         }
     }
 
-    private String resolveExpr(String field, Map<String, String> typeMap, String mode) {
+    private String resolveExpr(String field) {
         if (field == null) {
             return null;
         }
@@ -258,11 +239,15 @@ public class DataService {
             case "updated_by":
                 return "updated_by";
             default:
-                if (!typeMap.containsKey(f)) {
+                if (!isSafeField(f)) {
                     return null;
                 }
-                return fieldExpr(f, typeMap.get(f), mode);
+                return "data ->> '" + f + "'";
         }
+    }
+
+    private boolean isSafeField(String field) {
+        return FIELD_PATTERN.matcher(field).matches();
     }
 
     private static class ParamBuilder {

@@ -1,26 +1,17 @@
 package com.quickform.api.dto;
 
 public class WorkflowConfigSaveRequest {
-    private Long datasetId;
-    private String datasetCode;
+    private String pageCode;
     private String name;
 
     private Object config;
 
-    public Long getDatasetId() {
-        return datasetId;
+    public String getPageCode() {
+        return pageCode;
     }
 
-    public void setDatasetId(Long datasetId) {
-        this.datasetId = datasetId;
-    }
-
-    public String getDatasetCode() {
-        return datasetCode;
-    }
-
-    public void setDatasetCode(String datasetCode) {
-        this.datasetCode = datasetCode;
+    public void setPageCode(String pageCode) {
+        this.pageCode = pageCode;
     }
 
     public String getName() {

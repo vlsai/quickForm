@@ -3,34 +3,35 @@
 <mapper namespace="com.quickform.api.mapper.WorkflowMapper">
 
   <insert id="insertTask">
-    INSERT INTO workflow_task (record_id, dataset_id, node_code, assignee, status, action, comment)
-    VALUES (#{recordId}, #{datasetId}, #{nodeCode}, #{assignee}, #{status}, #{action}, #{comment})
+    INSERT INTO workflow_task (record_id, page_code, node_code, assignee, status, action, comment)
+    VALUES (#{recordId}, #{pageCode}, #{nodeCode}, #{assignee}, #{status}, #{action}, #{comment})
   </insert>
 
   <select id="listTasks" resultType="map">
     SELECT * FROM workflow_task
     <where>
       <if test="assignee != null and assignee != ''">assignee = #{assignee}</if>
+      <if test="pageCode != null and pageCode != ''">AND page_code = #{pageCode}</if>
     </where>
     ORDER BY created_at DESC
   </select>
 
   <select id="getWorkflow" resultType="map">
-    SELECT * FROM workflow WHERE dataset_id = #{datasetId} ORDER BY id DESC LIMIT 1
+    SELECT * FROM workflow WHERE page_code = #{pageCode} ORDER BY id DESC LIMIT 1
   </select>
 
-  <select id="findWorkflowIdByDatasetId" resultType="long">
-    SELECT id FROM workflow WHERE dataset_id = #{datasetId} ORDER BY id DESC LIMIT 1
+  <select id="findWorkflowIdByPageCode" resultType="long">
+    SELECT id FROM workflow WHERE page_code = #{pageCode} ORDER BY id DESC LIMIT 1
   </select>
 
   <select id="insertWorkflow" resultType="long">
-    INSERT INTO workflow (dataset_id, name, config_json)
-    VALUES (#{datasetId}, #{name}, #{configJson}::jsonb)
+    INSERT INTO workflow (page_code, name, config_json)
+    VALUES (#{pageCode}, #{name}, #{configJson}::jsonb)
     RETURNING id
   </select>
 
   <update id="updateWorkflow">
-    UPDATE workflow SET name = COALESCE(#{name}, name), config_json = #{configJson}::jsonb WHERE id = #{id}
+    UPDATE workflow SET name = COALESCE(#{name}, name), config_json = #{configJson}::jsonb, updated_at = NOW() WHERE id = #{id}
   </update>
 
   <select id="findPendingTaskIds" resultType="long">
@@ -69,12 +70,12 @@
 
   <update id="updateRecordStatus">
     UPDATE data_record SET status = #{status}, updated_at = NOW(), updated_by = #{operator}
-    WHERE id = #{recordId} AND dataset_id = #{datasetId}
+    WHERE id = #{recordId} AND page_code = #{pageCode}
   </update>
 
   <update id="touchRecord">
     UPDATE data_record SET updated_at = NOW(), updated_by = #{operator}
-    WHERE id = #{recordId} AND dataset_id = #{datasetId}
+    WHERE id = #{recordId} AND page_code = #{pageCode}
   </update>
 
 </mapper>

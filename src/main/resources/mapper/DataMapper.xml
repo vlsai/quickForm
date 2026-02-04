@@ -3,8 +3,8 @@
 <mapper namespace="com.quickform.api.mapper.DataMapper">
 
   <select id="createRecord" resultType="java.util.UUID">
-    INSERT INTO data_record (dataset_id, data, status, created_by, updated_by)
-    VALUES (#{datasetId}, #{dataJson}::jsonb, #{status}, #{operator}, #{operator})
+    INSERT INTO data_record (page_code, data, status, created_by, updated_by)
+    VALUES (#{pageCode}, #{dataJson}::jsonb, #{status}, #{operator}, #{operator})
     RETURNING id
   </select>
 
@@ -14,11 +14,11 @@
         status = COALESCE(#{status}, status),
         updated_at = NOW(),
         updated_by = #{operator}
-    WHERE id = #{id} AND dataset_id = #{datasetId}
+    WHERE id = #{id} AND page_code = #{pageCode}
   </update>
 
   <delete id="deleteRecord">
-    DELETE FROM data_record WHERE id = #{id} AND dataset_id = #{datasetId}
+    DELETE FROM data_record WHERE id = #{id} AND page_code = #{pageCode}
   </delete>
 
   <select id="query" resultType="map">

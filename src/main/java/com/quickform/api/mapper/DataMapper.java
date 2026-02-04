@@ -8,18 +8,18 @@ import java.util.UUID;
 
 public interface DataMapper {
 
-    UUID createRecord(@Param("datasetId") long datasetId,
+    UUID createRecord(@Param("pageCode") String pageCode,
                       @Param("dataJson") String dataJson,
                       @Param("status") String status,
                       @Param("operator") String operator);
 
     int updateRecord(@Param("id") UUID id,
-                     @Param("datasetId") long datasetId,
+                     @Param("pageCode") String pageCode,
                      @Param("dataJson") String dataJson,
                      @Param("status") String status,
                      @Param("operator") String operator);
 
-    int deleteRecord(@Param("id") UUID id, @Param("datasetId") long datasetId);
+    int deleteRecord(@Param("id") UUID id, @Param("pageCode") String pageCode);
 
     List<Map<String, Object>> query(@Param("sql") String sql, @Param("params") Map<String, Object> params);
 

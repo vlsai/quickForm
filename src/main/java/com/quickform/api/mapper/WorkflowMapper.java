@@ -9,20 +9,20 @@ import java.util.UUID;
 public interface WorkflowMapper {
 
     int insertTask(@Param("recordId") UUID recordId,
-                   @Param("datasetId") long datasetId,
+                   @Param("pageCode") String pageCode,
                    @Param("nodeCode") String nodeCode,
                    @Param("assignee") String assignee,
                    @Param("status") String status,
                    @Param("action") String action,
                    @Param("comment") String comment);
 
-    List<Map<String, Object>> listTasks(@Param("assignee") String assignee);
+    List<Map<String, Object>> listTasks(@Param("assignee") String assignee, @Param("pageCode") String pageCode);
 
-    Map<String, Object> getWorkflow(@Param("datasetId") long datasetId);
+    Map<String, Object> getWorkflow(@Param("pageCode") String pageCode);
 
-    Long findWorkflowIdByDatasetId(@Param("datasetId") long datasetId);
+    Long findWorkflowIdByPageCode(@Param("pageCode") String pageCode);
 
-    Long insertWorkflow(@Param("datasetId") long datasetId,
+    Long insertWorkflow(@Param("pageCode") String pageCode,
                         @Param("name") String name,
                         @Param("configJson") String configJson);
 
@@ -53,11 +53,11 @@ public interface WorkflowMapper {
     Long countPendingTasks(@Param("recordId") UUID recordId, @Param("nodeCode") String nodeCode);
 
     int updateRecordStatus(@Param("recordId") UUID recordId,
-                           @Param("datasetId") long datasetId,
+                           @Param("pageCode") String pageCode,
                            @Param("status") String status,
                            @Param("operator") String operator);
 
     int touchRecord(@Param("recordId") UUID recordId,
-                    @Param("datasetId") long datasetId,
+                    @Param("pageCode") String pageCode,
                     @Param("operator") String operator);
 }

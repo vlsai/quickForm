@@ -6,11 +6,10 @@ import com.quickform.api.dto.WorkflowConfigSaveRequest;
 import com.quickform.api.dto.WorkflowTaskQueryRequest;
 import com.quickform.api.exception.BadRequestException;
 import com.quickform.api.exception.NotFoundException;
-import com.quickform.api.model.DatasetInfo;
+import com.quickform.api.mapper.PageMapper;
+import com.quickform.api.mapper.WorkflowMapper;
 import com.quickform.api.model.WorkflowConfig;
 import com.quickform.api.model.WorkflowNode;
-import com.quickform.api.mapper.MetaMapper;
-import com.quickform.api.mapper.WorkflowMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -20,22 +19,24 @@ import java.util.UUID;
 
 @Service
 public class WorkflowService {
-    private final MetaMapper metaMapper;
+    private final PageMapper pageMapper;
     private final WorkflowMapper workflowMapper;
     private final JsonHelper jsonHelper;
 
-    public WorkflowService(MetaMapper metaMapper,
+    public WorkflowService(PageMapper pageMapper,
                            WorkflowMapper workflowMapper,
                            JsonHelper jsonHelper) {
-        this.metaMapper = metaMapper;
+        this.pageMapper = pageMapper;
         this.workflowMapper = workflowMapper;
         this.jsonHelper = jsonHelper;
     }
 
     public Map<String, Object> getConfig(WorkflowConfigGetRequest request) {
-        DatasetInfo dataset = resolveDataset(request == null ? null : request.getDatasetCode(),
-            request == null ? null : request.getDatasetId());
-        Map<String, Object> workflow = workflowMapper.getWorkflow(dataset.getId());
+        if (request == null || request.getPageCode() == null || request.getPageCode().isBlank()) {
+            throw new BadRequestException("page code required");
+        }
+        ensurePageExists(request.getPageCode());
+        Map<String, Object> workflow = workflowMapper.getWorkflow(request.getPageCode());
         if (workflow == null) {
             throw new NotFoundException("workflow config not found");
         }
@@ -47,31 +48,34 @@ public class WorkflowService {
     }
 
     public long saveConfig(WorkflowConfigSaveRequest request) {
-        if (request == null || request.getConfig() == null) {
+        if (request == null || request.getPageCode() == null || request.getPageCode().isBlank()) {
+            throw new BadRequestException("page code required");
+        }
+        if (request.getConfig() == null) {
             throw new BadRequestException("config required");
         }
-        DatasetInfo dataset = resolveDataset(request.getDatasetCode(), request.getDatasetId());
+        ensurePageExists(request.getPageCode());
         String configJson = jsonHelper.toJson(request.getConfig());
         WorkflowConfig config = jsonHelper.toObject(configJson, WorkflowConfig.class);
         validateConfig(config);
-        Long id = workflowMapper.findWorkflowIdByDatasetId(dataset.getId());
+        Long id = workflowMapper.findWorkflowIdByPageCode(request.getPageCode());
         if (id == null) {
-            return workflowMapper.insertWorkflow(dataset.getId(), request.getName(), configJson);
+            return workflowMapper.insertWorkflow(request.getPageCode(), request.getName(), configJson);
         }
         workflowMapper.updateWorkflow(id, request.getName(), configJson);
         return id;
     }
 
-    public int submit(String datasetCode, UUID recordId, WorkflowActionRequest request) {
-        DatasetInfo dataset = getDataset(datasetCode);
-        int updated = workflowMapper.updateRecordStatus(recordId, dataset.getId(), "submitted",
+    public int submit(String pageCode, UUID recordId, WorkflowActionRequest request) {
+        ensurePageExists(pageCode);
+        int updated = workflowMapper.updateRecordStatus(recordId, pageCode, "submitted",
             request == null ? null : request.getOperator());
 
-        WorkflowConfig config = loadConfig(dataset.getId());
+        WorkflowConfig config = loadConfig(pageCode);
         if (config == null || config.getNodes().isEmpty()) {
             workflowMapper.insertTask(
                 recordId,
-                dataset.getId(),
+                pageCode,
                 request == null ? "submit" : defaultNode(request.getNodeCode(), "submit"),
                 request == null ? null : request.getAssignee(),
                 "pending",
@@ -82,20 +86,20 @@ public class WorkflowService {
         }
 
         WorkflowNode first = config.getNodes().get(0);
-        createTasks(recordId, dataset.getId(), first, request == null ? null : request.getAssignee());
+        createTasks(recordId, pageCode, first, request == null ? null : request.getAssignee());
         return updated;
     }
 
-    public int approve(String datasetCode, UUID recordId, WorkflowActionRequest request) {
-        DatasetInfo dataset = getDataset(datasetCode);
+    public int approve(String pageCode, UUID recordId, WorkflowActionRequest request) {
+        ensurePageExists(pageCode);
         String operator = request == null ? null : request.getOperator();
 
-        WorkflowConfig config = loadConfig(dataset.getId());
+        WorkflowConfig config = loadConfig(pageCode);
         if (config == null || config.getNodes().isEmpty()) {
-            int updated = workflowMapper.updateRecordStatus(recordId, dataset.getId(), "approved", operator);
+            int updated = workflowMapper.updateRecordStatus(recordId, pageCode, "approved", operator);
             workflowMapper.insertTask(
                 recordId,
-                dataset.getId(),
+                pageCode,
                 request == null ? "approve" : defaultNode(request.getNodeCode(), "approve"),
                 request == null ? null : request.getAssignee(),
                 "done",
@@ -124,29 +128,29 @@ public class WorkflowService {
             nodeCompleted = workflowMapper.countPendingTasks(recordId, node.getCode()) == 0;
         }
 
-        workflowMapper.touchRecord(recordId, dataset.getId(), operator);
+        workflowMapper.touchRecord(recordId, pageCode, operator);
 
         if (nodeCompleted) {
             WorkflowNode next = nextNode(config, node.getCode());
             if (next != null) {
-                createTasks(recordId, dataset.getId(), next, null);
+                createTasks(recordId, pageCode, next, null);
             } else {
-                workflowMapper.updateRecordStatus(recordId, dataset.getId(), "approved", operator);
+                workflowMapper.updateRecordStatus(recordId, pageCode, "approved", operator);
             }
         }
         return 1;
     }
 
-    public int reject(String datasetCode, UUID recordId, WorkflowActionRequest request) {
-        DatasetInfo dataset = getDataset(datasetCode);
+    public int reject(String pageCode, UUID recordId, WorkflowActionRequest request) {
+        ensurePageExists(pageCode);
         String operator = request == null ? null : request.getOperator();
 
-        WorkflowConfig config = loadConfig(dataset.getId());
+        WorkflowConfig config = loadConfig(pageCode);
         if (config == null || config.getNodes().isEmpty()) {
-            int updated = workflowMapper.updateRecordStatus(recordId, dataset.getId(), "rejected", operator);
+            int updated = workflowMapper.updateRecordStatus(recordId, pageCode, "rejected", operator);
             workflowMapper.insertTask(
                 recordId,
-                dataset.getId(),
+                pageCode,
                 request == null ? "reject" : defaultNode(request.getNodeCode(), "reject"),
                 request == null ? null : request.getAssignee(),
                 "done",
@@ -168,49 +172,27 @@ public class WorkflowService {
         workflowMapper.updateTask(taskId, "done", "reject", request == null ? null : request.getComment());
         workflowMapper.cancelAllPendingTasks(recordId);
 
-        return workflowMapper.updateRecordStatus(recordId, dataset.getId(), "rejected", operator);
+        return workflowMapper.updateRecordStatus(recordId, pageCode, "rejected", operator);
     }
 
     public List<Map<String, Object>> listTasks(WorkflowTaskQueryRequest request) {
         String assignee = request == null ? null : request.getAssignee();
-        return workflowMapper.listTasks(assignee);
+        String pageCode = request == null ? null : request.getPageCode();
+        return workflowMapper.listTasks(assignee, pageCode);
     }
 
-    private DatasetInfo getDataset(String datasetCode) {
-        if (datasetCode == null || datasetCode.isBlank()) {
-            throw new BadRequestException("dataset code required");
+    private void ensurePageExists(String pageCode) {
+        if (pageCode == null || pageCode.isBlank()) {
+            throw new BadRequestException("page code required");
         }
-        Map<String, Object> datasetRow = metaMapper.getDatasetByCode(datasetCode);
-        DatasetInfo dataset = null;
-        if (datasetRow != null) {
-            long id = ((Number) datasetRow.get("id")).longValue();
-            String primaryKey = datasetRow.get("primary_key") == null ? "id" : datasetRow.get("primary_key").toString();
-            dataset = new DatasetInfo(id, datasetCode, primaryKey);
+        Map<String, Object> page = pageMapper.getPageByCode(pageCode);
+        if (page == null) {
+            throw new NotFoundException("page not found");
         }
-        if (dataset == null) {
-            throw new NotFoundException("dataset not found");
-        }
-        return dataset;
     }
 
-    private DatasetInfo resolveDataset(String datasetCode, Long datasetId) {
-        if (datasetId != null) {
-            Map<String, Object> dataset = metaMapper.getDatasetById(datasetId);
-            if (dataset == null) {
-                throw new NotFoundException("dataset not found");
-            }
-            String code = dataset.get("code") == null ? null : dataset.get("code").toString();
-            if (datasetCode != null && code != null && !datasetCode.equals(code)) {
-                throw new BadRequestException("dataset id/code mismatch");
-            }
-            String primaryKey = dataset.get("primary_key") == null ? "id" : dataset.get("primary_key").toString();
-            return new DatasetInfo(datasetId, code, primaryKey);
-        }
-        return getDataset(datasetCode);
-    }
-
-    private WorkflowConfig loadConfig(long datasetId) {
-        Map<String, Object> workflow = workflowMapper.getWorkflow(datasetId);
+    private WorkflowConfig loadConfig(String pageCode) {
+        Map<String, Object> workflow = workflowMapper.getWorkflow(pageCode);
         if (workflow == null || !workflow.containsKey("config_json")) {
             return null;
         }
@@ -296,18 +278,18 @@ public class WorkflowService {
         return ids.isEmpty() ? null : ids.get(0);
     }
 
-    private void createTasks(UUID recordId, long datasetId, WorkflowNode node, String fallbackAssignee) {
+    private void createTasks(UUID recordId, String pageCode, WorkflowNode node, String fallbackAssignee) {
         List<String> assignees = node.getAssignees() == null ? new ArrayList<>() : node.getAssignees();
         if (assignees.isEmpty()) {
             if (fallbackAssignee != null && !fallbackAssignee.isBlank()) {
-                workflowMapper.insertTask(recordId, datasetId, node.getCode(), fallbackAssignee, "pending", "pending", null);
+                workflowMapper.insertTask(recordId, pageCode, node.getCode(), fallbackAssignee, "pending", "pending", null);
             } else {
-                workflowMapper.insertTask(recordId, datasetId, node.getCode(), null, "pending", "pending", null);
+                workflowMapper.insertTask(recordId, pageCode, node.getCode(), null, "pending", "pending", null);
             }
             return;
         }
         for (String assignee : assignees) {
-            workflowMapper.insertTask(recordId, datasetId, node.getCode(), assignee, "pending", "pending", null);
+            workflowMapper.insertTask(recordId, pageCode, node.getCode(), assignee, "pending", "pending", null);
         }
     }
 

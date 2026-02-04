@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.quickform.api.mapper.PageMapper">
+
+  <select id="listPages" resultType="map">
+    SELECT * FROM page
+    <where>
+      <if test="keyword != null and keyword != ''">
+        (code ILIKE CONCAT('%', #{keyword}, '%') OR name ILIKE CONCAT('%', #{keyword}, '%'))
+      </if>
+    </where>
+    ORDER BY updated_at DESC
+  </select>
+
+  <select id="getPageByCode" resultType="map">
+    SELECT * FROM page WHERE code = #{pageCode}
+  </select>
+
+  <select id="findPageIdByCode" resultType="long">
+    SELECT id FROM page WHERE code = #{pageCode}
+  </select>
+
+  <select id="insertPage" resultType="long">
+    INSERT INTO page (code, name, schema_json, options, updated_at)
+    VALUES (#{pageCode}, #{name}, #{schemaJson}::jsonb, #{optionsJson}::jsonb, NOW())
+    RETURNING id
+  </select>
+
+  <update id="updatePage">
+    UPDATE page
+    SET name = #{name},
+        schema_json = #{schemaJson}::jsonb,
+        options = #{optionsJson}::jsonb,
+        updated_at = NOW()
+    WHERE code = #{pageCode}
+  </update>
+
+  <delete id="deletePage">
+    DELETE FROM page WHERE code = #{pageCode}
+  </delete>
+
+</mapper>

@@ -51,6 +51,12 @@ public class JsonHelper {
         if (value == null) {
             return null;
         }
+        if (clazz.isInstance(value)) {
+            return clazz.cast(value);
+        }
+        if (clazz == Object.class && (value instanceof Map || value instanceof Iterable)) {
+            return (T) value;
+        }
         String json;
         if (value instanceof PGobject) {
             json = ((PGobject) value).getValue();
