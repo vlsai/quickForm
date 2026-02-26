@@ -1,7 +1,7 @@
 # QuickForm Backend (Spring Boot + MyBatis XML)
 
 后端只存两类内容：
-- 页面 JSONSchema（`page` 表，前端直接保存/覆盖）
+- 页面 JSONSchema（`page` 表，由低代码平台直接写入/覆盖）
 - 业务数据 JSONB（`data_record` 表）
 
 工作流与报表与 `page_code` 绑定。
@@ -20,12 +20,6 @@ mvn spring-boot:run
 `schema.sql` 会在启动时自动建表。
 
 ## API（全部 POST）
-
-### Page
-- `/page/list`
-- `/page/get`
-- `/page/save`
-- `/page/delete`
 
 ### Data
 - `/data/{pageCode}/query`

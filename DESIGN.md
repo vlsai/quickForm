@@ -1,6 +1,6 @@
 # QuickForm 后端设计文档（精简版：页面 Schema + JSONB 数据）
 
-> 目标：后端只做存储。前端创建/修改页面时直接保存 JSONSchema；业务数据统一落 JSONB。页面修改**直接覆盖**数据库中的 schema，不做解析或处理。
+> 目标：后端只做存储。低代码平台创建/修改页面时直接写入 JSONSchema；业务数据统一落 JSONB。页面修改**直接覆盖**数据库中的 schema，不做解析或处理。
 
 ## 1. 架构概览
 
@@ -101,16 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_task_record_node_status ON workflow_task(record_i
 
 ## 4. 接口设计（全部 POST）
 
-### 4.1 Page
-
-| 接口 | 功能 |
-|---|---|
-| `/page/list` | 列出页面 |
-| `/page/get` | 获取页面 schema |
-| `/page/save` | 保存/覆盖 schema |
-| `/page/delete` | 删除页面 |
-
-### 4.2 Data
+### 4.1 Data
 
 | 接口 | 功能 |
 |---|---|
@@ -119,7 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_task_record_node_status ON workflow_task(record_i
 | `/data/{pageCode}/{id}/update` | 更新数据 |
 | `/data/{pageCode}/{id}/delete` | 删除数据 |
 
-### 4.3 Workflow
+### 4.2 Workflow
 
 | 接口 | 功能 |
 |---|---|
@@ -130,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_task_record_node_status ON workflow_task(record_i
 | `/workflow/{pageCode}/{id}/reject` | 审批驳回 |
 | `/workflow/tasks` | 查询任务 |
 
-### 4.4 Report
+### 4.3 Report
 
 | 接口 | 功能 |
 |---|---|
@@ -195,7 +186,7 @@ mybatis:
 
 ```
 src/main/java/com/quickform/api
-  controller/   接口层
+  controller/   数据/流程/报表接口
   dto/          请求/响应结构
   mapper/       MyBatis Mapper 接口
   model/        业务模型
@@ -206,6 +197,12 @@ src/main/resources
   schema.sql    初始化表
   application.yml
 ```
+
+## 9. 页面 Schema 维护方式
+
+- 不提供 `/page/*` 管理接口。
+- 页面 schema 由低代码平台直接写 `page` 表（或通过独立中台服务写入）。
+- 业务接口只要求 `page_code` 已存在。
 
 ---
 
