@@ -194,12 +194,49 @@ Controller 文件：
 `Filter.op` 支持：
 - `eq` `ne` `like` `gt` `gte` `lt` `lte` `in` `contains`
 
+操作符详细说明（后端当前实现语义）：
+
+| `op` | 语义 | 值类型建议 | SQL 语义（简化） | 说明 |
+|---|---|---|---|---|
+| `eq` | 等于 | 字符串/数字/布尔 | `expr = value` | 数字会转 `numeric` 比较；布尔会转 `boolean` 比较 |
+| `ne` | 不等于 | 字符串/数字/布尔 | `expr <> value` | 同 `eq` 的类型转换规则 |
+| `like` | 模糊匹配 | 字符串 | `expr ILIKE '%value%'` | 大小写不敏感 |
+| `gt` | 大于 | 数字（推荐） | `expr > value` | 数字会按数值比较 |
+| `gte` | 大于等于 | 数字（推荐） | `expr >= value` | 数字会按数值比较 |
+| `lt` | 小于 | 数字（推荐） | `expr < value` | 数字会按数值比较 |
+| `lte` | 小于等于 | 数字（推荐） | `expr <= value` | 数字会按数值比较 |
+| `in` | 集合包含 | 数组 | `expr IN (...)` | `value` 必须是数组，空数组会忽略该条件 |
+| `contains` | JSON 包含 | JSON 值 | `data -> 'field' @> value::jsonb` | 用于 JSON 子结构包含判断 |
+
 排序字段支持：
 - 固定字段：`status` `createdAt` `updatedAt` `createdBy` `updatedBy`
 - 动态字段：JSON 键名（正则 `^[a-zA-Z0-9_]+$`）
 
 返回：`PageResult<Map>`，`items` 中每项字段：
 - `id` `status` `createdAt` `updatedAt` `createdBy` `updatedBy` `data`
+
+请求示例：
+
+```json
+{
+  "keywords": "紧急",
+  "filters": [
+    {"field": "age", "op": "gte", "value": 18},
+    {"field": "status", "op": "eq", "value": "submitted"},
+    {"field": "tags", "op": "contains", "value": ["vip"]}
+  ],
+  "orFilters": [
+    {"field": "owner", "op": "eq", "value": "A"},
+    {"field": "owner", "op": "eq", "value": "B"}
+  ],
+  "sorts": [
+    {"field": "updatedAt", "order": "desc"},
+    {"field": "age", "order": "asc"}
+  ],
+  "page": 1,
+  "pageSize": 20
+}
+```
 
 ### 5.1.2 `POST /data/{pageCode}/create`
 
@@ -213,6 +250,21 @@ Controller 文件：
 
 返回：新记录 `UUID`
 
+请求示例：
+
+```json
+{
+  "operator": "u1001",
+  "status": "draft",
+  "data": {
+    "title": "数据库变更",
+    "age": 23,
+    "owner": "A",
+    "tags": ["vip", "important"]
+  }
+}
+```
+
 ### 5.1.3 `POST /data/{pageCode}/{id}/update`
 
 请求体：`DataWriteRequest`
@@ -225,15 +277,34 @@ Controller 文件：
 
 返回：影响行数 `int`
 
+请求示例：
+
+```json
+{
+  "operator": "u1001",
+  "status": "submitted",
+  "data": {
+    "title": "数据库变更-修订",
+    "age": 24,
+    "owner": "A",
+    "tags": ["vip"]
+  }
+}
+```
+
 ### 5.1.4 `POST /data/{pageCode}/{id}/delete`
 
 请求体：无  
 返回：影响行数 `int`
 
+请求示例：`POST /data/change_apply/9d3b8c13-95e5-4d3b-83e2-5d2b9c4740f1/delete`（空 body）
+
 ### 5.1.5 `POST /data/{pageCode}/{id}/get`
 
 请求体：无  
 返回字段：`id` `status` `createdAt` `updatedAt` `createdBy` `updatedBy` `data`
+
+请求示例：`POST /data/change_apply/9d3b8c13-95e5-4d3b-83e2-5d2b9c4740f1/get`（空 body）
 
 ## 5.2 流程模板接口
 
@@ -250,9 +321,30 @@ Controller 文件：
 
 返回 item 字段：`id` `pageCode` `templateCode` `name` `enabled` `isDefault` `updatedAt` `nodeCount`
 
+请求示例：
+
+```json
+{
+  "pageCode": "change_apply",
+  "enabled": true,
+  "keyword": "常规",
+  "page": 1,
+  "pageSize": 20
+}
+```
+
 ### 5.2.2 `POST /workflow/template/get`
 请求：`WorkflowTemplateGetRequest`（`pageCode` + `templateCode`）  
 返回字段：`id` `pageCode` `templateCode` `name` `enabled` `isDefault` `updatedAt` `config` `nodeCount`
+
+请求示例：
+
+```json
+{
+  "pageCode": "change_apply",
+  "templateCode": "normal_change_v1"
+}
+```
 
 ### 5.2.3 `POST /workflow/template/save`
 请求：`WorkflowTemplateSaveRequest`
@@ -268,17 +360,53 @@ Controller 文件：
 
 返回：模板 ID（新增或更新后的 ID）
 
+请求示例：
+
+```json
+{
+  "pageCode": "change_apply",
+  "templateCode": "normal_change_v1",
+  "name": "常规变更流程",
+  "enabled": true,
+  "isDefault": true,
+  "config": {
+    "nodes": [
+      {"code": "L1", "name": "第一层审批", "mode": "all", "assignees": ["A", "B"]},
+      {"code": "L2", "name": "第二层审批", "mode": "any", "assignees": ["C", "D"]}
+    ]
+  }
+}
+```
+
 ### 5.2.4 `POST /workflow/template/delete`
 请求：`WorkflowTemplateDeleteRequest`（`pageCode` + `templateCode`）  
 返回：影响行数 `int`
 
 限制：若该模板仍有 `pending` 任务，不允许删除。
 
+请求示例：
+
+```json
+{
+  "pageCode": "change_apply",
+  "templateCode": "normal_change_v1"
+}
+```
+
 ### 5.2.5 `POST /workflow/template/set-default`
 请求：`WorkflowTemplateSetDefaultRequest`（`pageCode` + `templateCode`）  
 返回：影响行数 `int`
 
 限制：禁用模板不能设为默认。
+
+请求示例：
+
+```json
+{
+  "pageCode": "change_apply",
+  "templateCode": "normal_change_v1"
+}
+```
 
 ## 5.3 流程动作接口
 
@@ -294,6 +422,16 @@ Controller 文件：
 | `nodeCode` | `String` | 否 | 忽略 |
 
 返回：`1` 表示发起成功
+
+请求示例（URL：`/workflow/change_apply/{recordId}/submit`）：
+
+```json
+{
+  "operator": "u1001",
+  "templateCode": "normal_change_v1",
+  "comment": "发起审批"
+}
+```
 
 关键校验：
 - 记录必须存在。
@@ -312,6 +450,16 @@ Controller 文件：
 
 返回：`1` 表示审批动作成功
 
+请求示例（URL：`/workflow/change_apply/{recordId}/approve`）：
+
+```json
+{
+  "operator": "A",
+  "nodeCode": "L1",
+  "comment": "同意"
+}
+```
+
 审批权限判定：
 - 仅允许处理当前节点中分配给 `operator` 的 `pending` 任务。
 - 若存在无审批人任务（`assignee IS NULL`），允许当前 `operator` 处理。
@@ -320,6 +468,16 @@ Controller 文件：
 ### 5.3.3 `POST /workflow/{pageCode}/{id}/reject`
 请求与 `approve` 相同。  
 返回：`1` 表示驳回成功。
+
+请求示例（URL：`/workflow/change_apply/{recordId}/reject`）：
+
+```json
+{
+  "operator": "A",
+  "nodeCode": "L1",
+  "comment": "信息不完整，退回"
+}
+```
 
 行为：
 - 当前任务置 `done + reject`
@@ -345,6 +503,18 @@ Controller 文件：
 - `workflowStatus` `currentNodeCode` `starter` `startedAt` `finishedAt`
 - `createdAt` `updatedAt`
 
+请求示例：
+
+```json
+{
+  "assignee": "A",
+  "pageCode": "change_apply",
+  "keywords": "normal",
+  "page": 1,
+  "pageSize": 20
+}
+```
+
 ### 5.4.2 `POST /workflow/done/query`
 请求：`WorkflowDoneQueryRequest`
 
@@ -357,6 +527,18 @@ Controller 文件：
 | `pageSize` | `Integer` | 否 | 默认 20，最大 200 |
 
 返回字段与 `todo` 类似，额外包含 `operator`。
+
+请求示例：
+
+```json
+{
+  "operator": "A",
+  "pageCode": "change_apply",
+  "keywords": "L1",
+  "page": 1,
+  "pageSize": 20
+}
+```
 
 ### 5.4.3 `POST /workflow/my-apply/query`
 请求：`WorkflowMyApplyQueryRequest`
@@ -376,6 +558,19 @@ Controller 文件：
 - `pendingAssignees`（数组）
 - `starter` `startedAt` `finishedAt` `updatedAt`
 
+请求示例：
+
+```json
+{
+  "operator": "u1001",
+  "pageCode": "change_apply",
+  "status": "submitted",
+  "keywords": "normal",
+  "page": 1,
+  "pageSize": 20
+}
+```
+
 ### 5.4.4 `POST /workflow/record/timeline`
 请求：`WorkflowRecordTimelineRequest`
 
@@ -388,6 +583,15 @@ Controller 文件：
 - `record`：`recordId` `pageCode`
 - `instance`：`instanceId` `templateCode` `templateName` `workflowStatus` `currentNodeCode` `starter` `startedAt` `finishedAt` `updatedAt`
 - `timeline`：任务列表，字段 `taskId` `instanceId` `recordId` `pageCode` `templateCode` `templateName` `nodeCode` `assignee` `taskStatus` `action` `comment` `operator` `createdAt` `updatedAt`
+
+请求示例：
+
+```json
+{
+  "pageCode": "change_apply",
+  "recordId": "9d3b8c13-95e5-4d3b-83e2-5d2b9c4740f1"
+}
+```
 
 ## 5.5 报表接口
 
@@ -409,6 +613,18 @@ Controller 文件：
 示例：
 - 库中 SQL：`SELECT * FROM data_record WHERE page_code = :pageCode AND status = :status`
 - 请求 `params`：`{"pageCode":"change_apply","status":"approved"}`
+
+请求示例：
+
+```json
+{
+  "pageCode": "change_apply",
+  "params": {
+    "pageCode": "change_apply",
+    "status": "approved"
+  }
+}
+```
 
 ## 6. 枚举与校验规则
 
