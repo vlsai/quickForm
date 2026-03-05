@@ -31,8 +31,8 @@ public class JsonHelper {
         if (value == null) {
             return new HashMap<>();
         }
-        if (value instanceof Map) {
-            return (Map<String, Object>) value;
+        if (value instanceof Map<?, ?> map) {
+            return objectMapper.convertValue(map, new TypeReference<Map<String, Object>>() {});
         }
         String json;
         if (value instanceof PGobject) {
@@ -51,11 +51,11 @@ public class JsonHelper {
         if (value == null) {
             return null;
         }
-        if (clazz.isInstance(value)) {
+        if (clazz == Object.class) {
             return clazz.cast(value);
         }
-        if (clazz == Object.class && (value instanceof Map || value instanceof Iterable)) {
-            return (T) value;
+        if (clazz.isInstance(value)) {
+            return clazz.cast(value);
         }
         String json;
         if (value instanceof PGobject) {
