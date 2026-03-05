@@ -2,7 +2,7 @@
 
 后端只存两类内容：
 - 业务数据 JSONB（`data_record` 表）
-- 审核配置/任务与报表配置（均按 `page_code` 归类）
+- 审核模板/任务与报表配置（均按 `page_code` 归类）
 
 工作流与报表与 `page_code` 绑定。
 
@@ -28,12 +28,18 @@ mvn spring-boot:run
 - `/data/{pageCode}/{id}/delete`
 
 ### Workflow
-- `/workflow/config/get`
-- `/workflow/config/save`
+- `/workflow/template/list`
+- `/workflow/template/get`
+- `/workflow/template/save`
+- `/workflow/template/delete`
+- `/workflow/template/set-default`
 - `/workflow/{pageCode}/{id}/submit`
 - `/workflow/{pageCode}/{id}/approve`
 - `/workflow/{pageCode}/{id}/reject`
-- `/workflow/tasks`
+- `/workflow/todo/query`
+- `/workflow/done/query`
+- `/workflow/my-apply/query`
+- `/workflow/record/timeline`
 
 ### Report
 - `/report/run`
@@ -59,18 +65,31 @@ mvn spring-boot:run
 }
 ```
 
-### Workflow Config Save
+### Workflow Template Save
 
 ```json
 {
-  "pageCode": "customer",
-  "name": "customer-approval",
+  "pageCode": "change_apply",
+  "templateCode": "normal_change_v1",
+  "name": "change-approval",
+  "enabled": true,
+  "isDefault": true,
   "config": {
     "nodes": [
-      {"code": "dept", "name": "部门审核", "mode": "all", "assignees": ["u1", "u2"]},
-      {"code": "finance", "name": "财务审核", "mode": "any", "assignees": ["u3", "u4"]}
+      {"code": "L1", "name": "第一层审批", "mode": "all", "assignees": ["A", "B"]},
+      {"code": "L2", "name": "第二层审批", "mode": "any", "assignees": ["C", "D"]}
     ]
   }
+}
+```
+
+### Submit Workflow
+
+```json
+{
+  "operator": "u1001",
+  "templateCode": "normal_change_v1",
+  "comment": "发起审批"
 }
 ```
 

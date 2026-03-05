@@ -2,80 +2,333 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.quickform.api.mapper.WorkflowMapper">
 
-  <insert id="insertTask">
-    INSERT INTO workflow_task (record_id, page_code, node_code, assignee, status, action, comment)
-    VALUES (#{recordId}, #{pageCode}, #{nodeCode}, #{assignee}, #{status}, #{action}, #{comment})
-  </insert>
-
-  <select id="listTasks" resultType="map">
-    SELECT * FROM workflow_task
-    <where>
-      <if test="assignee != null and assignee != ''">assignee = #{assignee}</if>
-      <if test="pageCode != null and pageCode != ''">AND page_code = #{pageCode}</if>
-    </where>
-    ORDER BY created_at DESC
+  <select id="countTemplates" resultType="long">
+    SELECT COUNT(1)
+    FROM workflow_template
+    WHERE page_code = #{pageCode}
+    <if test="enabled != null">AND enabled = #{enabled}</if>
+    <if test="keyword != null and keyword != ''">
+      AND (name ILIKE CONCAT('%', #{keyword}, '%') OR template_code ILIKE CONCAT('%', #{keyword}, '%'))
+    </if>
   </select>
 
-  <select id="getWorkflow" resultType="map">
-    SELECT * FROM workflow WHERE page_code = #{pageCode} ORDER BY id DESC LIMIT 1
+  <select id="listTemplates" resultType="map">
+    SELECT id, page_code, template_code, name, config_json, enabled, is_default, updated_at
+    FROM workflow_template
+    WHERE page_code = #{pageCode}
+    <if test="enabled != null">AND enabled = #{enabled}</if>
+    <if test="keyword != null and keyword != ''">
+      AND (name ILIKE CONCAT('%', #{keyword}, '%') OR template_code ILIKE CONCAT('%', #{keyword}, '%'))
+    </if>
+    ORDER BY is_default DESC, updated_at DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 
-  <select id="findWorkflowIdByPageCode" resultType="long">
-    SELECT id FROM workflow WHERE page_code = #{pageCode} ORDER BY id DESC LIMIT 1
+  <select id="getTemplate" resultType="map">
+    SELECT id, page_code, template_code, name, config_json, enabled, is_default, updated_at
+    FROM workflow_template
+    WHERE page_code = #{pageCode} AND template_code = #{templateCode}
+    LIMIT 1
   </select>
 
-  <select id="insertWorkflow" resultType="long">
-    INSERT INTO workflow (page_code, name, config_json)
-    VALUES (#{pageCode}, #{name}, #{configJson}::jsonb)
+  <select id="getDefaultTemplate" resultType="map">
+    SELECT id, page_code, template_code, name, config_json, enabled, is_default, updated_at
+    FROM workflow_template
+    WHERE page_code = #{pageCode} AND enabled = TRUE AND is_default = TRUE
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 1
+  </select>
+
+  <select id="insertTemplate" resultType="long">
+    INSERT INTO workflow_template (page_code, template_code, name, config_json, enabled, is_default, updated_at)
+    VALUES (#{pageCode}, #{templateCode}, #{name}, #{configJson}::jsonb, #{enabled}, #{isDefault}, NOW())
     RETURNING id
   </select>
 
-  <update id="updateWorkflow">
-    UPDATE workflow SET name = COALESCE(#{name}, name), config_json = #{configJson}::jsonb, updated_at = NOW() WHERE id = #{id}
+  <update id="updateTemplate">
+    UPDATE workflow_template
+    SET name = #{name},
+        config_json = #{configJson}::jsonb,
+        enabled = #{enabled},
+        is_default = #{isDefault},
+        updated_at = NOW()
+    WHERE id = #{id}
   </update>
 
+  <update id="clearDefaultByPage">
+    UPDATE workflow_template
+    SET is_default = FALSE, updated_at = NOW()
+    WHERE page_code = #{pageCode} AND is_default = TRUE
+  </update>
+
+  <update id="updateTemplateDefault">
+    UPDATE workflow_template
+    SET is_default = #{isDefault}, updated_at = NOW()
+    WHERE id = #{id}
+  </update>
+
+  <delete id="deleteTemplate">
+    DELETE FROM workflow_template
+    WHERE page_code = #{pageCode} AND template_code = #{templateCode}
+  </delete>
+
+  <select id="countPendingTasksByTemplate" resultType="long">
+    SELECT COUNT(1)
+    FROM workflow_task
+    WHERE page_code = #{pageCode}
+      AND template_code = #{templateCode}
+      AND status = 'pending'
+  </select>
+
+  <select id="getRecord" resultType="map">
+    SELECT id, page_code, data, status, workflow_template_code, created_at, updated_at, created_by, updated_by
+    FROM data_record
+    WHERE id = #{recordId} AND page_code = #{pageCode}
+    LIMIT 1
+  </select>
+
+  <update id="updateRecordOnSubmit">
+    UPDATE data_record
+    SET status = 'submitted',
+        workflow_template_code = #{templateCode},
+        updated_at = NOW(),
+        updated_by = #{operator}
+    WHERE id = #{recordId} AND page_code = #{pageCode}
+  </update>
+
+  <select id="countRecordPendingTasks" resultType="long">
+    SELECT COUNT(1)
+    FROM workflow_task
+    WHERE record_id = #{recordId} AND status = 'pending'
+  </select>
+
+  <insert id="insertTask">
+    INSERT INTO workflow_task (record_id, page_code, template_id, template_code, node_code, assignee, status, action, comment, operated_by, created_at, updated_at)
+    VALUES (#{recordId}, #{pageCode}, #{templateId}, #{templateCode}, #{nodeCode}, #{assignee}, #{status}, #{action}, #{comment}, #{operatedBy}, NOW(), NOW())
+  </insert>
+
   <select id="findPendingTaskIds" resultType="long">
-    SELECT id FROM workflow_task WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending' ORDER BY id
+    SELECT id
+    FROM workflow_task
+    WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending'
+    ORDER BY id
   </select>
 
   <select id="findPendingTaskIdByAssignee" resultType="long">
-    SELECT id FROM workflow_task WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending' AND assignee = #{assignee} ORDER BY id LIMIT 1
+    SELECT id
+    FROM workflow_task
+    WHERE record_id = #{recordId}
+      AND node_code = #{nodeCode}
+      AND status = 'pending'
+      AND assignee = #{assignee}
+    ORDER BY id
+    LIMIT 1
   </select>
 
   <select id="findPendingTaskIdByRecordAndAssignee" resultType="long">
-    SELECT id FROM workflow_task WHERE record_id = #{recordId} AND status = 'pending' AND assignee = #{assignee} ORDER BY id LIMIT 1
+    SELECT id
+    FROM workflow_task
+    WHERE record_id = #{recordId}
+      AND status = 'pending'
+      AND assignee = #{assignee}
+    ORDER BY id
+    LIMIT 1
   </select>
 
   <select id="getTaskNodeCode" resultType="string">
     SELECT node_code FROM workflow_task WHERE id = #{id}
   </select>
 
-  <update id="updateTask">
-    UPDATE workflow_task SET status = #{status}, action = #{action}, comment = #{comment} WHERE id = #{id}
+  <update id="completeTask">
+    UPDATE workflow_task
+    SET status = 'done',
+        action = #{action},
+        comment = #{comment},
+        operated_by = #{operator},
+        updated_at = NOW()
+    WHERE id = #{id} AND status = 'pending'
   </update>
 
   <update id="cancelPendingTasks">
-    UPDATE workflow_task SET status = 'cancelled', action = 'skip'
+    UPDATE workflow_task
+    SET status = 'cancelled',
+        action = 'skip',
+        updated_at = NOW()
     WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending'
   </update>
 
   <update id="cancelAllPendingTasks">
-    UPDATE workflow_task SET status = 'cancelled', action = 'skip'
+    UPDATE workflow_task
+    SET status = 'cancelled',
+        action = 'skip',
+        updated_at = NOW()
     WHERE record_id = #{recordId} AND status = 'pending'
   </update>
 
   <select id="countPendingTasks" resultType="long">
-    SELECT COUNT(1) FROM workflow_task WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending'
+    SELECT COUNT(1)
+    FROM workflow_task
+    WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending'
   </select>
 
   <update id="updateRecordStatus">
-    UPDATE data_record SET status = #{status}, updated_at = NOW(), updated_by = #{operator}
+    UPDATE data_record
+    SET status = #{status},
+        updated_at = NOW(),
+        updated_by = #{operator}
     WHERE id = #{recordId} AND page_code = #{pageCode}
   </update>
 
   <update id="touchRecord">
-    UPDATE data_record SET updated_at = NOW(), updated_by = #{operator}
+    UPDATE data_record
+    SET updated_at = NOW(), updated_by = #{operator}
     WHERE id = #{recordId} AND page_code = #{pageCode}
   </update>
+
+  <select id="countTodo" resultType="long">
+    SELECT COUNT(1)
+    FROM workflow_task t
+    JOIN data_record r ON r.id = t.record_id AND r.page_code = t.page_code
+    WHERE t.status = 'pending'
+      AND t.assignee = #{assignee}
+    <if test="pageCode != null and pageCode != ''">AND t.page_code = #{pageCode}</if>
+    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+  </select>
+
+  <select id="queryTodo" resultType="map">
+    SELECT
+      t.id AS task_id,
+      t.record_id,
+      t.page_code,
+      t.template_code,
+      wt.name AS template_name,
+      t.node_code,
+      t.assignee,
+      t.status AS task_status,
+      t.action,
+      t.comment,
+      t.created_at AS task_created_at,
+      t.updated_at AS task_updated_at,
+      r.status AS record_status,
+      r.data,
+      r.created_at AS record_created_at,
+      r.updated_at AS record_updated_at,
+      r.created_by
+    FROM workflow_task t
+    JOIN data_record r ON r.id = t.record_id AND r.page_code = t.page_code
+    LEFT JOIN workflow_template wt ON wt.page_code = t.page_code AND wt.template_code = t.template_code
+    WHERE t.status = 'pending'
+      AND t.assignee = #{assignee}
+    <if test="pageCode != null and pageCode != ''">AND t.page_code = #{pageCode}</if>
+    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+    ORDER BY t.created_at DESC, t.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countDone" resultType="long">
+    SELECT COUNT(1)
+    FROM workflow_task t
+    JOIN data_record r ON r.id = t.record_id AND r.page_code = t.page_code
+    WHERE t.status = 'done'
+      AND t.action IN ('approve', 'reject')
+      AND t.operated_by = #{operator}
+    <if test="pageCode != null and pageCode != ''">AND t.page_code = #{pageCode}</if>
+    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+  </select>
+
+  <select id="queryDone" resultType="map">
+    SELECT
+      t.id AS task_id,
+      t.record_id,
+      t.page_code,
+      t.template_code,
+      wt.name AS template_name,
+      t.node_code,
+      t.assignee,
+      t.status AS task_status,
+      t.action,
+      t.comment,
+      t.operated_by,
+      t.created_at AS task_created_at,
+      t.updated_at AS task_updated_at,
+      r.status AS record_status,
+      r.data,
+      r.created_at AS record_created_at,
+      r.updated_at AS record_updated_at,
+      r.created_by
+    FROM workflow_task t
+    JOIN data_record r ON r.id = t.record_id AND r.page_code = t.page_code
+    LEFT JOIN workflow_template wt ON wt.page_code = t.page_code AND wt.template_code = t.template_code
+    WHERE t.status = 'done'
+      AND t.action IN ('approve', 'reject')
+      AND t.operated_by = #{operator}
+    <if test="pageCode != null and pageCode != ''">AND t.page_code = #{pageCode}</if>
+    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+    ORDER BY t.updated_at DESC, t.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countMyApply" resultType="long">
+    SELECT COUNT(1)
+    FROM data_record r
+    WHERE r.created_by = #{operator}
+    <if test="pageCode != null and pageCode != ''">AND r.page_code = #{pageCode}</if>
+    <if test="status != null and status != ''">AND r.status = #{status}</if>
+    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+  </select>
+
+  <select id="queryMyApply" resultType="map">
+    SELECT
+      r.id AS record_id,
+      r.page_code,
+      r.status AS record_status,
+      r.workflow_template_code AS template_code,
+      wt.name AS template_name,
+      r.data,
+      r.created_at AS record_created_at,
+      r.updated_at AS record_updated_at,
+      p.node_code AS pending_node_code,
+      p.pending_assignees
+    FROM data_record r
+    LEFT JOIN workflow_template wt ON wt.page_code = r.page_code AND wt.template_code = r.workflow_template_code
+    LEFT JOIN LATERAL (
+      SELECT
+        t.node_code,
+        string_agg(t.assignee, ',' ORDER BY t.id) AS pending_assignees
+      FROM workflow_task t
+      WHERE t.record_id = r.id
+        AND t.status = 'pending'
+      GROUP BY t.node_code
+      ORDER BY MIN(t.id)
+      LIMIT 1
+    ) p ON TRUE
+    WHERE r.created_by = #{operator}
+    <if test="pageCode != null and pageCode != ''">AND r.page_code = #{pageCode}</if>
+    <if test="status != null and status != ''">AND r.status = #{status}</if>
+    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+    ORDER BY r.updated_at DESC, r.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="listTimeline" resultType="map">
+    SELECT
+      t.id AS task_id,
+      t.record_id,
+      t.page_code,
+      t.template_code,
+      wt.name AS template_name,
+      t.node_code,
+      t.assignee,
+      t.status AS task_status,
+      t.action,
+      t.comment,
+      t.operated_by,
+      t.created_at,
+      t.updated_at
+    FROM workflow_task t
+    LEFT JOIN workflow_template wt ON wt.page_code = t.page_code AND wt.template_code = t.template_code
+    WHERE t.record_id = #{recordId} AND t.page_code = #{pageCode}
+    ORDER BY t.id ASC
+  </select>
 
 </mapper>

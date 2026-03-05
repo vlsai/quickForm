@@ -5,6 +5,7 @@ public class WorkflowActionRequest {
     private String comment;
     private String operator;
     private String nodeCode;
+    private String templateCode;
 
     public String getAssignee() {
         return assignee;
@@ -36,5 +37,13 @@ public class WorkflowActionRequest {
 
     public void setNodeCode(String nodeCode) {
         this.nodeCode = nodeCode;
+    }
+
+    public String getTemplateCode() {
+        return templateCode;
+    }
+
+    public void setTemplateCode(String templateCode) {
+        this.templateCode = templateCode;
     }
 }
