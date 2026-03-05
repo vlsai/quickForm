@@ -6,7 +6,6 @@ import com.quickform.api.dto.WorkflowConfigSaveRequest;
 import com.quickform.api.dto.WorkflowTaskQueryRequest;
 import com.quickform.api.exception.BadRequestException;
 import com.quickform.api.exception.NotFoundException;
-import com.quickform.api.mapper.PageMapper;
 import com.quickform.api.mapper.WorkflowMapper;
 import com.quickform.api.model.WorkflowConfig;
 import com.quickform.api.model.WorkflowNode;
@@ -16,17 +15,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Service
 public class WorkflowService {
-    private final PageMapper pageMapper;
     private final WorkflowMapper workflowMapper;
     private final JsonHelper jsonHelper;
+    private static final Pattern PAGE_CODE_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]+$");
 
-    public WorkflowService(PageMapper pageMapper,
-                           WorkflowMapper workflowMapper,
+    public WorkflowService(WorkflowMapper workflowMapper,
                            JsonHelper jsonHelper) {
-        this.pageMapper = pageMapper;
         this.workflowMapper = workflowMapper;
         this.jsonHelper = jsonHelper;
     }
@@ -35,7 +33,7 @@ public class WorkflowService {
         if (request == null || request.getPageCode() == null || request.getPageCode().isBlank()) {
             throw new BadRequestException("page code required");
         }
-        ensurePageExists(request.getPageCode());
+        validatePageCode(request.getPageCode());
         Map<String, Object> workflow = workflowMapper.getWorkflow(request.getPageCode());
         if (workflow == null) {
             throw new NotFoundException("workflow config not found");
@@ -54,7 +52,7 @@ public class WorkflowService {
         if (request.getConfig() == null) {
             throw new BadRequestException("config required");
         }
-        ensurePageExists(request.getPageCode());
+        validatePageCode(request.getPageCode());
         String configJson = jsonHelper.toJson(request.getConfig());
         WorkflowConfig config = jsonHelper.toObject(configJson, WorkflowConfig.class);
         validateConfig(config);
@@ -67,7 +65,7 @@ public class WorkflowService {
     }
 
     public int submit(String pageCode, UUID recordId, WorkflowActionRequest request) {
-        ensurePageExists(pageCode);
+        validatePageCode(pageCode);
         int updated = workflowMapper.updateRecordStatus(recordId, pageCode, "submitted",
             request == null ? null : request.getOperator());
 
@@ -91,7 +89,7 @@ public class WorkflowService {
     }
 
     public int approve(String pageCode, UUID recordId, WorkflowActionRequest request) {
-        ensurePageExists(pageCode);
+        validatePageCode(pageCode);
         String operator = request == null ? null : request.getOperator();
 
         WorkflowConfig config = loadConfig(pageCode);
@@ -142,7 +140,7 @@ public class WorkflowService {
     }
 
     public int reject(String pageCode, UUID recordId, WorkflowActionRequest request) {
-        ensurePageExists(pageCode);
+        validatePageCode(pageCode);
         String operator = request == null ? null : request.getOperator();
 
         WorkflowConfig config = loadConfig(pageCode);
@@ -178,16 +176,18 @@ public class WorkflowService {
     public List<Map<String, Object>> listTasks(WorkflowTaskQueryRequest request) {
         String assignee = request == null ? null : request.getAssignee();
         String pageCode = request == null ? null : request.getPageCode();
+        if (pageCode != null && !pageCode.isBlank()) {
+            validatePageCode(pageCode);
+        }
         return workflowMapper.listTasks(assignee, pageCode);
     }
 
-    private void ensurePageExists(String pageCode) {
+    private void validatePageCode(String pageCode) {
         if (pageCode == null || pageCode.isBlank()) {
             throw new BadRequestException("page code required");
         }
-        Map<String, Object> page = pageMapper.getPageByCode(pageCode);
-        if (page == null) {
-            throw new NotFoundException("page not found");
+        if (!PAGE_CODE_PATTERN.matcher(pageCode).matches()) {
+            throw new BadRequestException("invalid page code");
         }
     }
 

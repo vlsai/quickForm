@@ -2,9 +2,7 @@ package com.quickform.api.service;
 
 import com.quickform.api.dto.*;
 import com.quickform.api.exception.BadRequestException;
-import com.quickform.api.exception.NotFoundException;
 import com.quickform.api.mapper.DataMapper;
-import com.quickform.api.mapper.PageMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -13,18 +11,17 @@ import java.util.regex.Pattern;
 @Service
 public class DataService {
     private final DataMapper dataMapper;
-    private final PageMapper pageMapper;
     private final JsonHelper jsonHelper;
     private static final Pattern FIELD_PATTERN = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern PAGE_CODE_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]+$");
 
-    public DataService(DataMapper dataMapper, PageMapper pageMapper, JsonHelper jsonHelper) {
+    public DataService(DataMapper dataMapper, JsonHelper jsonHelper) {
         this.dataMapper = dataMapper;
-        this.pageMapper = pageMapper;
         this.jsonHelper = jsonHelper;
     }
 
     public PageResult<Map<String, Object>> query(String pageCode, DataQueryRequest request) {
-        ensurePageExists(pageCode);
+        validatePageCode(pageCode);
         QuerySql querySql = buildQuerySql(pageCode, request);
         long total = dataMapper.count(querySql.countSql, querySql.params);
         List<Map<String, Object>> rows = dataMapper.query(querySql.pageSql, querySql.params);
@@ -48,7 +45,7 @@ public class DataService {
     }
 
     public UUID create(String pageCode, DataWriteRequest request) {
-        ensurePageExists(pageCode);
+        validatePageCode(pageCode);
         if (request == null || request.getData() == null) {
             throw new BadRequestException("data required");
         }
@@ -58,7 +55,7 @@ public class DataService {
     }
 
     public int update(String pageCode, UUID id, DataWriteRequest request) {
-        ensurePageExists(pageCode);
+        validatePageCode(pageCode);
         if (request == null || request.getData() == null) {
             throw new BadRequestException("data required");
         }
@@ -67,17 +64,16 @@ public class DataService {
     }
 
     public int delete(String pageCode, UUID id) {
-        ensurePageExists(pageCode);
+        validatePageCode(pageCode);
         return dataMapper.deleteRecord(id, pageCode);
     }
 
-    private void ensurePageExists(String pageCode) {
+    private void validatePageCode(String pageCode) {
         if (pageCode == null || pageCode.isBlank()) {
             throw new BadRequestException("page code required");
         }
-        Map<String, Object> page = pageMapper.getPageByCode(pageCode);
-        if (page == null) {
-            throw new NotFoundException("page not found");
+        if (!PAGE_CODE_PATTERN.matcher(pageCode).matches()) {
+            throw new BadRequestException("invalid page code");
         }
     }
 

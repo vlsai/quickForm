@@ -1,8 +1,8 @@
 # QuickForm Backend (Spring Boot + MyBatis XML)
 
 后端只存两类内容：
-- 页面 JSONSchema（`page` 表，由低代码平台直接写入/覆盖）
 - 业务数据 JSONB（`data_record` 表）
+- 审核配置/任务与报表配置（均按 `page_code` 归类）
 
 工作流与报表与 `page_code` 绑定。
 
@@ -39,20 +39,6 @@ mvn spring-boot:run
 - `/report/run`
 
 ## Example Payloads
-
-### Page Save
-
-```json
-{
-  "pageCode": "customer",
-  "name": "客户管理",
-  "schema": {
-    "componentName": "Page",
-    "props": {},
-    "children": []
-  }
-}
-```
 
 ### Query Data (AND + OR)
 
@@ -98,3 +84,5 @@ mvn spring-boot:run
 ```
 
 说明：报表 SQL 支持 `:param` 命名参数（自动转换为 MyBatis 绑定）。
+
+说明：后端不维护页面信息，`pageCode` 由前端固定传入并作为数据/流程/报表分组键。

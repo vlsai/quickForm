@@ -1,39 +1,21 @@
-# QuickForm 后端设计文档（精简版：页面 Schema + JSONB 数据）
+# QuickForm 后端设计文档（精简版：固定 page_code + JSONB 数据）
 
-> 目标：后端只做存储。低代码平台创建/修改页面时直接写入 JSONSchema；业务数据统一落 JSONB。页面修改**直接覆盖**数据库中的 schema，不做解析或处理。
+> 目标：后端不存页面，仅按前端固定 `page_code` 归类数据、流程、报表。
 
 ## 1. 架构概览
 
-- **前端**：TinyEngine 低代码生成页面，并输出 JSONSchema
+- **前端**：低代码平台生成页面并维护固定 `page_code`
 - **后端**：Spring Boot + MyBatis XML，仅提供存储与查询
 - **数据库**：PostgreSQL，业务数据 JSONB
 
 ## 2. 数据模型（PostgreSQL）
 
-### 2.1 页面表（存 JSONSchema）
-
-```sql
-CREATE TABLE IF NOT EXISTS page (
-  id BIGSERIAL PRIMARY KEY,
-  code TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  schema_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  options JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-```
-
-- `code`：页面唯一标识（`page_code`）
-- `schema_json`：前端保存的 JSONSchema
-- **页面修改时直接覆盖该字段**
-
-### 2.2 数据表（JSONB）
+### 2.1 数据表（JSONB）
 
 ```sql
 CREATE TABLE IF NOT EXISTS data_record (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  page_code TEXT NOT NULL REFERENCES page(code),
+  page_code TEXT NOT NULL,
   data JSONB NOT NULL DEFAULT '{}'::jsonb,
   status TEXT NOT NULL DEFAULT 'draft',
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -51,7 +33,7 @@ CREATE TABLE IF NOT EXISTS data_record (
 ```sql
 CREATE TABLE IF NOT EXISTS workflow (
   id BIGSERIAL PRIMARY KEY,
-  page_code TEXT NOT NULL REFERENCES page(code),
+  page_code TEXT NOT NULL,
   name TEXT NOT NULL,
   config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -60,7 +42,7 @@ CREATE TABLE IF NOT EXISTS workflow (
 CREATE TABLE IF NOT EXISTS workflow_task (
   id BIGSERIAL PRIMARY KEY,
   record_id UUID NOT NULL REFERENCES data_record(id),
-  page_code TEXT NOT NULL REFERENCES page(code),
+  page_code TEXT NOT NULL,
   node_code TEXT NOT NULL,
   assignee TEXT,
   status TEXT NOT NULL,
@@ -75,7 +57,7 @@ CREATE TABLE IF NOT EXISTS workflow_task (
 ```sql
 CREATE TABLE IF NOT EXISTS report (
   id BIGSERIAL PRIMARY KEY,
-  page_code TEXT REFERENCES page(code),
+  page_code TEXT,
   name TEXT NOT NULL,
   sql_text TEXT NOT NULL,
   options JSONB NOT NULL DEFAULT '{}'::jsonb
@@ -85,19 +67,21 @@ CREATE TABLE IF NOT EXISTS report (
 ### 2.5 索引
 
 ```sql
-CREATE INDEX IF NOT EXISTS idx_page_code ON page(code);
 CREATE INDEX IF NOT EXISTS idx_data_page ON data_record(page_code);
 CREATE INDEX IF NOT EXISTS idx_data_gin ON data_record USING GIN (data);
+CREATE INDEX IF NOT EXISTS idx_workflow_page ON workflow(page_code);
+CREATE INDEX IF NOT EXISTS idx_report_page ON report(page_code);
+CREATE INDEX IF NOT EXISTS idx_task_page ON workflow_task(page_code);
 CREATE INDEX IF NOT EXISTS idx_task_assignee ON workflow_task(assignee);
 CREATE INDEX IF NOT EXISTS idx_task_record_node_status ON workflow_task(record_id, node_code, status);
 ```
 
 ## 3. 核心原则
 
-1. **页面 Schema 完全由前端控制**
-2. 后端不解析 schema，不做字段级处理
-3. 修改页面时直接替换 `schema_json`
-4. 业务数据全部存 JSONB
+1. `page_code` 由前端固定并透传
+2. 后端不维护页面定义
+3. 业务数据全部存 JSONB
+4. 流程/报表按 `page_code` 隔离
 
 ## 4. 接口设计（全部 POST）
 
@@ -198,11 +182,11 @@ src/main/resources
   application.yml
 ```
 
-## 9. 页面 Schema 维护方式
+## 9. page_code 约定
 
 - 不提供 `/page/*` 管理接口。
-- 页面 schema 由低代码平台直接写 `page` 表（或通过独立中台服务写入）。
-- 业务接口只要求 `page_code` 已存在。
+- 后端不会校验 `page_code` 是否存在于页面表。
+- 仅校验格式：`[a-zA-Z0-9_-]+`。
 
 ---
 
