@@ -81,43 +81,155 @@
   </select>
 
   <select id="getRecord" resultType="map">
-    SELECT id, page_code, data, status, workflow_template_code, created_at, updated_at, created_by, updated_by
+    SELECT id, page_code, data, status, created_at, updated_at, created_by, updated_by
     FROM data_record
     WHERE id = #{recordId} AND page_code = #{pageCode}
     LIMIT 1
   </select>
 
-  <update id="updateRecordOnSubmit">
-    UPDATE data_record
-    SET status = 'submitted',
-        workflow_template_code = #{templateCode},
-        updated_at = NOW(),
-        updated_by = #{operator}
-    WHERE id = #{recordId} AND page_code = #{pageCode}
-  </update>
-
   <select id="countRecordPendingTasks" resultType="long">
     SELECT COUNT(1)
     FROM workflow_task
-    WHERE record_id = #{recordId} AND status = 'pending'
+    WHERE record_id = #{recordId}
+      AND page_code = #{pageCode}
+      AND status = 'pending'
   </select>
 
+  <select id="insertInstance" resultType="long">
+    INSERT INTO workflow_instance (
+      page_code,
+      record_id,
+      template_id,
+      template_code,
+      status,
+      current_node_code,
+      starter,
+      started_at,
+      updated_at
+    )
+    VALUES (
+      #{pageCode},
+      #{recordId},
+      #{templateId},
+      #{templateCode},
+      'submitted',
+      #{currentNodeCode},
+      #{starter},
+      NOW(),
+      NOW()
+    )
+    RETURNING id
+  </select>
+
+  <select id="getActiveInstance" resultType="map">
+    SELECT
+      wi.id,
+      wi.page_code,
+      wi.record_id,
+      wi.template_id,
+      wi.template_code,
+      wi.status,
+      wi.current_node_code,
+      wi.starter,
+      wi.started_at,
+      wi.finished_at,
+      wi.updated_at,
+      wt.name AS template_name
+    FROM workflow_instance wi
+    LEFT JOIN workflow_template wt ON wt.id = wi.template_id
+    WHERE wi.record_id = #{recordId}
+      AND wi.page_code = #{pageCode}
+      AND wi.status = 'submitted'
+    ORDER BY wi.id DESC
+    LIMIT 1
+  </select>
+
+  <select id="getLatestInstance" resultType="map">
+    SELECT
+      wi.id,
+      wi.page_code,
+      wi.record_id,
+      wi.template_id,
+      wi.template_code,
+      wi.status,
+      wi.current_node_code,
+      wi.starter,
+      wi.started_at,
+      wi.finished_at,
+      wi.updated_at,
+      wt.name AS template_name
+    FROM workflow_instance wi
+    LEFT JOIN workflow_template wt ON wt.id = wi.template_id
+    WHERE wi.record_id = #{recordId}
+      AND wi.page_code = #{pageCode}
+    ORDER BY wi.id DESC
+    LIMIT 1
+  </select>
+
+  <update id="updateInstanceCurrentNode">
+    UPDATE workflow_instance
+    SET current_node_code = #{currentNodeCode},
+        updated_at = NOW()
+    WHERE id = #{instanceId}
+      AND status = 'submitted'
+  </update>
+
+  <update id="completeInstance">
+    UPDATE workflow_instance
+    SET status = #{status},
+        current_node_code = NULL,
+        finished_at = NOW(),
+        updated_at = NOW()
+    WHERE id = #{instanceId}
+      AND status = 'submitted'
+  </update>
+
   <insert id="insertTask">
-    INSERT INTO workflow_task (record_id, page_code, template_id, template_code, node_code, assignee, status, action, comment, operated_by, created_at, updated_at)
-    VALUES (#{recordId}, #{pageCode}, #{templateId}, #{templateCode}, #{nodeCode}, #{assignee}, #{status}, #{action}, #{comment}, #{operatedBy}, NOW(), NOW())
+    INSERT INTO workflow_task (
+      instance_id,
+      record_id,
+      page_code,
+      template_id,
+      template_code,
+      node_code,
+      assignee,
+      status,
+      action,
+      comment,
+      operated_by,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      #{instanceId},
+      #{recordId},
+      #{pageCode},
+      #{templateId},
+      #{templateCode},
+      #{nodeCode},
+      #{assignee},
+      #{status},
+      #{action},
+      #{comment},
+      #{operatedBy},
+      NOW(),
+      NOW()
+    )
   </insert>
 
   <select id="findPendingTaskIds" resultType="long">
     SELECT id
     FROM workflow_task
-    WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending'
+    WHERE instance_id = #{instanceId}
+      AND node_code = #{nodeCode}
+      AND status = 'pending'
     ORDER BY id
   </select>
 
   <select id="findPendingTaskIdByAssignee" resultType="long">
     SELECT id
     FROM workflow_task
-    WHERE record_id = #{recordId}
+    WHERE instance_id = #{instanceId}
       AND node_code = #{nodeCode}
       AND status = 'pending'
       AND assignee = #{assignee}
@@ -125,10 +237,21 @@
     LIMIT 1
   </select>
 
-  <select id="findPendingTaskIdByRecordAndAssignee" resultType="long">
+  <select id="findPendingUnassignedTaskId" resultType="long">
     SELECT id
     FROM workflow_task
-    WHERE record_id = #{recordId}
+    WHERE instance_id = #{instanceId}
+      AND node_code = #{nodeCode}
+      AND status = 'pending'
+      AND assignee IS NULL
+    ORDER BY id
+    LIMIT 1
+  </select>
+
+  <select id="findPendingTaskIdByInstanceAndAssignee" resultType="long">
+    SELECT id
+    FROM workflow_task
+    WHERE instance_id = #{instanceId}
       AND status = 'pending'
       AND assignee = #{assignee}
     ORDER BY id
@@ -136,7 +259,9 @@
   </select>
 
   <select id="getTaskNodeCode" resultType="string">
-    SELECT node_code FROM workflow_task WHERE id = #{id}
+    SELECT node_code
+    FROM workflow_task
+    WHERE id = #{id}
   </select>
 
   <update id="completeTask">
@@ -154,7 +279,9 @@
     SET status = 'cancelled',
         action = 'skip',
         updated_at = NOW()
-    WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending'
+    WHERE instance_id = #{instanceId}
+      AND node_code = #{nodeCode}
+      AND status = 'pending'
   </update>
 
   <update id="cancelAllPendingTasks">
@@ -162,45 +289,42 @@
     SET status = 'cancelled',
         action = 'skip',
         updated_at = NOW()
-    WHERE record_id = #{recordId} AND status = 'pending'
+    WHERE instance_id = #{instanceId}
+      AND status = 'pending'
   </update>
 
   <select id="countPendingTasks" resultType="long">
     SELECT COUNT(1)
     FROM workflow_task
-    WHERE record_id = #{recordId} AND node_code = #{nodeCode} AND status = 'pending'
+    WHERE instance_id = #{instanceId}
+      AND node_code = #{nodeCode}
+      AND status = 'pending'
   </select>
-
-  <update id="updateRecordStatus">
-    UPDATE data_record
-    SET status = #{status},
-        updated_at = NOW(),
-        updated_by = #{operator}
-    WHERE id = #{recordId} AND page_code = #{pageCode}
-  </update>
-
-  <update id="touchRecord">
-    UPDATE data_record
-    SET updated_at = NOW(), updated_by = #{operator}
-    WHERE id = #{recordId} AND page_code = #{pageCode}
-  </update>
 
   <select id="countTodo" resultType="long">
     SELECT COUNT(1)
     FROM workflow_task t
-    JOIN data_record r ON r.id = t.record_id AND r.page_code = t.page_code
+    JOIN workflow_instance wi ON wi.id = t.instance_id
+    LEFT JOIN workflow_template wt ON wt.id = wi.template_id
     WHERE t.status = 'pending'
       AND t.assignee = #{assignee}
-    <if test="pageCode != null and pageCode != ''">AND t.page_code = #{pageCode}</if>
-    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+    <if test="pageCode != null and pageCode != ''">AND wi.page_code = #{pageCode}</if>
+    <if test="keywords != null and keywords != ''">
+      AND (
+        CAST(wi.record_id AS TEXT) ILIKE CONCAT('%', #{keywords}, '%')
+        OR COALESCE(wt.name, '') ILIKE CONCAT('%', #{keywords}, '%')
+        OR t.node_code ILIKE CONCAT('%', #{keywords}, '%')
+      )
+    </if>
   </select>
 
   <select id="queryTodo" resultType="map">
     SELECT
       t.id AS task_id,
-      t.record_id,
-      t.page_code,
-      t.template_code,
+      t.instance_id,
+      wi.record_id,
+      wi.page_code,
+      wi.template_code,
       wt.name AS template_name,
       t.node_code,
       t.assignee,
@@ -209,18 +333,24 @@
       t.comment,
       t.created_at AS task_created_at,
       t.updated_at AS task_updated_at,
-      r.status AS record_status,
-      r.data,
-      r.created_at AS record_created_at,
-      r.updated_at AS record_updated_at,
-      r.created_by
+      wi.status AS workflow_status,
+      wi.current_node_code,
+      wi.starter,
+      wi.started_at,
+      wi.finished_at
     FROM workflow_task t
-    JOIN data_record r ON r.id = t.record_id AND r.page_code = t.page_code
-    LEFT JOIN workflow_template wt ON wt.page_code = t.page_code AND wt.template_code = t.template_code
+    JOIN workflow_instance wi ON wi.id = t.instance_id
+    LEFT JOIN workflow_template wt ON wt.id = wi.template_id
     WHERE t.status = 'pending'
       AND t.assignee = #{assignee}
-    <if test="pageCode != null and pageCode != ''">AND t.page_code = #{pageCode}</if>
-    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+    <if test="pageCode != null and pageCode != ''">AND wi.page_code = #{pageCode}</if>
+    <if test="keywords != null and keywords != ''">
+      AND (
+        CAST(wi.record_id AS TEXT) ILIKE CONCAT('%', #{keywords}, '%')
+        OR COALESCE(wt.name, '') ILIKE CONCAT('%', #{keywords}, '%')
+        OR t.node_code ILIKE CONCAT('%', #{keywords}, '%')
+      )
+    </if>
     ORDER BY t.created_at DESC, t.id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>
@@ -228,20 +358,28 @@
   <select id="countDone" resultType="long">
     SELECT COUNT(1)
     FROM workflow_task t
-    JOIN data_record r ON r.id = t.record_id AND r.page_code = t.page_code
+    JOIN workflow_instance wi ON wi.id = t.instance_id
+    LEFT JOIN workflow_template wt ON wt.id = wi.template_id
     WHERE t.status = 'done'
       AND t.action IN ('approve', 'reject')
       AND t.operated_by = #{operator}
-    <if test="pageCode != null and pageCode != ''">AND t.page_code = #{pageCode}</if>
-    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+    <if test="pageCode != null and pageCode != ''">AND wi.page_code = #{pageCode}</if>
+    <if test="keywords != null and keywords != ''">
+      AND (
+        CAST(wi.record_id AS TEXT) ILIKE CONCAT('%', #{keywords}, '%')
+        OR COALESCE(wt.name, '') ILIKE CONCAT('%', #{keywords}, '%')
+        OR t.node_code ILIKE CONCAT('%', #{keywords}, '%')
+      )
+    </if>
   </select>
 
   <select id="queryDone" resultType="map">
     SELECT
       t.id AS task_id,
-      t.record_id,
-      t.page_code,
-      t.template_code,
+      t.instance_id,
+      wi.record_id,
+      wi.page_code,
+      wi.template_code,
       wt.name AS template_name,
       t.node_code,
       t.assignee,
@@ -251,68 +389,86 @@
       t.operated_by,
       t.created_at AS task_created_at,
       t.updated_at AS task_updated_at,
-      r.status AS record_status,
-      r.data,
-      r.created_at AS record_created_at,
-      r.updated_at AS record_updated_at,
-      r.created_by
+      wi.status AS workflow_status,
+      wi.current_node_code,
+      wi.starter,
+      wi.started_at,
+      wi.finished_at
     FROM workflow_task t
-    JOIN data_record r ON r.id = t.record_id AND r.page_code = t.page_code
-    LEFT JOIN workflow_template wt ON wt.page_code = t.page_code AND wt.template_code = t.template_code
+    JOIN workflow_instance wi ON wi.id = t.instance_id
+    LEFT JOIN workflow_template wt ON wt.id = wi.template_id
     WHERE t.status = 'done'
       AND t.action IN ('approve', 'reject')
       AND t.operated_by = #{operator}
-    <if test="pageCode != null and pageCode != ''">AND t.page_code = #{pageCode}</if>
-    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+    <if test="pageCode != null and pageCode != ''">AND wi.page_code = #{pageCode}</if>
+    <if test="keywords != null and keywords != ''">
+      AND (
+        CAST(wi.record_id AS TEXT) ILIKE CONCAT('%', #{keywords}, '%')
+        OR COALESCE(wt.name, '') ILIKE CONCAT('%', #{keywords}, '%')
+        OR t.node_code ILIKE CONCAT('%', #{keywords}, '%')
+      )
+    </if>
     ORDER BY t.updated_at DESC, t.id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <select id="countMyApply" resultType="long">
     SELECT COUNT(1)
-    FROM data_record r
-    WHERE r.created_by = #{operator}
-    <if test="pageCode != null and pageCode != ''">AND r.page_code = #{pageCode}</if>
-    <if test="status != null and status != ''">AND r.status = #{status}</if>
-    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
+    FROM workflow_instance wi
+    LEFT JOIN workflow_template wt ON wt.id = wi.template_id
+    WHERE wi.starter = #{operator}
+    <if test="pageCode != null and pageCode != ''">AND wi.page_code = #{pageCode}</if>
+    <if test="status != null and status != ''">AND wi.status = #{status}</if>
+    <if test="keywords != null and keywords != ''">
+      AND (
+        CAST(wi.record_id AS TEXT) ILIKE CONCAT('%', #{keywords}, '%')
+        OR COALESCE(wt.name, '') ILIKE CONCAT('%', #{keywords}, '%')
+        OR COALESCE(wi.current_node_code, '') ILIKE CONCAT('%', #{keywords}, '%')
+      )
+    </if>
   </select>
 
   <select id="queryMyApply" resultType="map">
     SELECT
-      r.id AS record_id,
-      r.page_code,
-      r.status AS record_status,
-      r.workflow_template_code AS template_code,
+      wi.id AS instance_id,
+      wi.record_id,
+      wi.page_code,
+      wi.status AS workflow_status,
+      wi.template_code,
       wt.name AS template_name,
-      r.data,
-      r.created_at AS record_created_at,
-      r.updated_at AS record_updated_at,
-      p.node_code AS pending_node_code,
-      p.pending_assignees
-    FROM data_record r
-    LEFT JOIN workflow_template wt ON wt.page_code = r.page_code AND wt.template_code = r.workflow_template_code
+      wi.current_node_code,
+      p.pending_assignees,
+      wi.starter,
+      wi.started_at,
+      wi.finished_at,
+      wi.updated_at
+    FROM workflow_instance wi
+    LEFT JOIN workflow_template wt ON wt.id = wi.template_id
     LEFT JOIN LATERAL (
-      SELECT
-        t.node_code,
-        string_agg(t.assignee, ',' ORDER BY t.id) AS pending_assignees
+      SELECT string_agg(t.assignee, ',' ORDER BY t.id) AS pending_assignees
       FROM workflow_task t
-      WHERE t.record_id = r.id
+      WHERE t.instance_id = wi.id
         AND t.status = 'pending'
-      GROUP BY t.node_code
-      ORDER BY MIN(t.id)
-      LIMIT 1
+        AND t.node_code = wi.current_node_code
     ) p ON TRUE
-    WHERE r.created_by = #{operator}
-    <if test="pageCode != null and pageCode != ''">AND r.page_code = #{pageCode}</if>
-    <if test="status != null and status != ''">AND r.status = #{status}</if>
-    <if test="keywords != null and keywords != ''">AND r.data::text ILIKE CONCAT('%', #{keywords}, '%')</if>
-    ORDER BY r.updated_at DESC, r.id DESC
+    WHERE wi.starter = #{operator}
+    <if test="pageCode != null and pageCode != ''">AND wi.page_code = #{pageCode}</if>
+    <if test="status != null and status != ''">AND wi.status = #{status}</if>
+    <if test="keywords != null and keywords != ''">
+      AND (
+        CAST(wi.record_id AS TEXT) ILIKE CONCAT('%', #{keywords}, '%')
+        OR COALESCE(wt.name, '') ILIKE CONCAT('%', #{keywords}, '%')
+        OR COALESCE(wi.current_node_code, '') ILIKE CONCAT('%', #{keywords}, '%')
+      )
+    </if>
+    ORDER BY wi.updated_at DESC, wi.id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
-  <select id="listTimeline" resultType="map">
+  <select id="listTimelineByInstance" resultType="map">
     SELECT
       t.id AS task_id,
+      t.instance_id,
       t.record_id,
       t.page_code,
       t.template_code,
@@ -326,8 +482,8 @@
       t.created_at,
       t.updated_at
     FROM workflow_task t
-    LEFT JOIN workflow_template wt ON wt.page_code = t.page_code AND wt.template_code = t.template_code
-    WHERE t.record_id = #{recordId} AND t.page_code = #{pageCode}
+    LEFT JOIN workflow_template wt ON wt.id = t.template_id
+    WHERE t.instance_id = #{instanceId}
     ORDER BY t.id ASC
   </select>
 

@@ -50,14 +50,30 @@ public interface WorkflowMapper {
     Map<String, Object> getRecord(@Param("recordId") UUID recordId,
                                   @Param("pageCode") String pageCode);
 
-    int updateRecordOnSubmit(@Param("recordId") UUID recordId,
-                             @Param("pageCode") String pageCode,
-                             @Param("operator") String operator,
-                             @Param("templateCode") String templateCode);
+    Long countRecordPendingTasks(@Param("recordId") UUID recordId,
+                                 @Param("pageCode") String pageCode);
 
-    Long countRecordPendingTasks(@Param("recordId") UUID recordId);
+    Long insertInstance(@Param("pageCode") String pageCode,
+                        @Param("recordId") UUID recordId,
+                        @Param("templateId") Long templateId,
+                        @Param("templateCode") String templateCode,
+                        @Param("starter") String starter,
+                        @Param("currentNodeCode") String currentNodeCode);
 
-    int insertTask(@Param("recordId") UUID recordId,
+    Map<String, Object> getActiveInstance(@Param("recordId") UUID recordId,
+                                          @Param("pageCode") String pageCode);
+
+    Map<String, Object> getLatestInstance(@Param("recordId") UUID recordId,
+                                          @Param("pageCode") String pageCode);
+
+    int updateInstanceCurrentNode(@Param("instanceId") long instanceId,
+                                  @Param("currentNodeCode") String currentNodeCode);
+
+    int completeInstance(@Param("instanceId") long instanceId,
+                         @Param("status") String status);
+
+    int insertTask(@Param("instanceId") long instanceId,
+                   @Param("recordId") UUID recordId,
                    @Param("pageCode") String pageCode,
                    @Param("templateId") Long templateId,
                    @Param("templateCode") String templateCode,
@@ -68,37 +84,33 @@ public interface WorkflowMapper {
                    @Param("comment") String comment,
                    @Param("operatedBy") String operatedBy);
 
-    List<Long> findPendingTaskIds(@Param("recordId") UUID recordId,
+    List<Long> findPendingTaskIds(@Param("instanceId") long instanceId,
                                   @Param("nodeCode") String nodeCode);
 
-    Long findPendingTaskIdByAssignee(@Param("recordId") UUID recordId,
+    Long findPendingTaskIdByAssignee(@Param("instanceId") long instanceId,
                                      @Param("nodeCode") String nodeCode,
                                      @Param("assignee") String assignee);
 
-    Long findPendingTaskIdByRecordAndAssignee(@Param("recordId") UUID recordId,
-                                              @Param("assignee") String assignee);
+    Long findPendingUnassignedTaskId(@Param("instanceId") long instanceId,
+                                     @Param("nodeCode") String nodeCode);
+
+    Long findPendingTaskIdByInstanceAndAssignee(@Param("instanceId") long instanceId,
+                                                @Param("assignee") String assignee);
 
     String getTaskNodeCode(@Param("id") long id);
 
     int completeTask(@Param("id") long id,
-                   @Param("action") String action,
-                   @Param("comment") String comment,
-                   @Param("operator") String operator);
+                     @Param("action") String action,
+                     @Param("comment") String comment,
+                     @Param("operator") String operator);
 
-    int cancelPendingTasks(@Param("recordId") UUID recordId, @Param("nodeCode") String nodeCode);
+    int cancelPendingTasks(@Param("instanceId") long instanceId,
+                           @Param("nodeCode") String nodeCode);
 
-    int cancelAllPendingTasks(@Param("recordId") UUID recordId);
+    int cancelAllPendingTasks(@Param("instanceId") long instanceId);
 
-    Long countPendingTasks(@Param("recordId") UUID recordId, @Param("nodeCode") String nodeCode);
-
-    int updateRecordStatus(@Param("recordId") UUID recordId,
-                           @Param("pageCode") String pageCode,
-                           @Param("status") String status,
-                           @Param("operator") String operator);
-
-    int touchRecord(@Param("recordId") UUID recordId,
-                    @Param("pageCode") String pageCode,
-                    @Param("operator") String operator);
+    Long countPendingTasks(@Param("instanceId") long instanceId,
+                           @Param("nodeCode") String nodeCode);
 
     Long countTodo(@Param("assignee") String assignee,
                    @Param("pageCode") String pageCode,
@@ -132,6 +144,5 @@ public interface WorkflowMapper {
                                            @Param("limit") int limit,
                                            @Param("offset") int offset);
 
-    List<Map<String, Object>> listTimeline(@Param("recordId") UUID recordId,
-                                           @Param("pageCode") String pageCode);
+    List<Map<String, Object>> listTimelineByInstance(@Param("instanceId") long instanceId);
 }

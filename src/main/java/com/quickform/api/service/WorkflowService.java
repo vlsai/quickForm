@@ -35,6 +35,7 @@ public class WorkflowService {
         int pageSize = normalizePageSize(request.getPageSize());
         int offset = (page - 1) * pageSize;
         String keyword = trimToNull(request.getKeyword());
+
         Long total = workflowMapper.countTemplates(pageCode, request.getEnabled(), keyword);
         List<Map<String, Object>> rows = workflowMapper.listTemplates(pageCode, request.getEnabled(), keyword, pageSize, offset);
 
@@ -154,17 +155,18 @@ public class WorkflowService {
     @Transactional
     public int submit(String pageCode, UUID recordId, WorkflowActionRequest request) {
         validatePageCode(pageCode);
-        Map<String, Object> record = requireRecord(recordId, pageCode);
-        String status = str(pick(record, "status"));
-        if (!"draft".equalsIgnoreCase(status) && !"rejected".equalsIgnoreCase(status)) {
-            throw new BadRequestException("record status does not allow submit");
-        }
-        Long pendingCount = workflowMapper.countRecordPendingTasks(recordId);
+        requireRecord(recordId, pageCode);
+        String operator = requireOperator(request);
+
+        Long pendingCount = workflowMapper.countRecordPendingTasks(recordId, pageCode);
         if (pendingCount != null && pendingCount > 0) {
             throw new BadRequestException("record already has pending tasks");
         }
+        Map<String, Object> active = workflowMapper.getActiveInstance(recordId, pageCode);
+        if (active != null) {
+            throw new BadRequestException("workflow already submitted");
+        }
 
-        String operator = request == null ? null : trimToNull(request.getOperator());
         String requestedTemplateCode = request == null ? null : trimToNull(request.getTemplateCode());
         Map<String, Object> template = requestedTemplateCode == null
             ? workflowMapper.getDefaultTemplate(pageCode)
@@ -181,28 +183,22 @@ public class WorkflowService {
         WorkflowConfig config = parseConfig(pick(template, "config_json", "configJson"));
         validateConfig(config);
 
-        int updated = workflowMapper.updateRecordOnSubmit(recordId, pageCode, operator, templateCode);
-        if (updated == 0) {
-            throw new NotFoundException("record not found");
+        WorkflowNode firstNode = config.getNodes().get(0);
+        Long instanceId = workflowMapper.insertInstance(pageCode, recordId, templateId, templateCode, operator, firstNode.getCode());
+        if (instanceId == null || instanceId <= 0) {
+            throw new BadRequestException("failed to create workflow instance");
         }
-        WorkflowNode first = config.getNodes().get(0);
-        createTasks(recordId, pageCode, templateId, templateCode, first, request == null ? null : request.getAssignee());
-        return updated;
+        createTasks(instanceId, recordId, pageCode, templateId, templateCode, firstNode, request == null ? null : request.getAssignee());
+        return 1;
     }
 
     @Transactional
     public int approve(String pageCode, UUID recordId, WorkflowActionRequest request) {
         validatePageCode(pageCode);
         String operator = requireOperator(request);
-        Map<String, Object> record = requireRecord(recordId, pageCode);
-        if (!"submitted".equalsIgnoreCase(str(pick(record, "status")))) {
-            throw new BadRequestException("record is not in submitted status");
-        }
+        Map<String, Object> instance = requireActiveInstance(recordId, pageCode);
 
-        String templateCode = str(pick(record, "workflow_template_code", "workflowTemplateCode"));
-        if (isBlank(templateCode)) {
-            throw new BadRequestException("record workflow template not found");
-        }
+        String templateCode = str(pick(instance, "template_code", "templateCode"));
         Map<String, Object> template = workflowMapper.getTemplate(pageCode, templateCode);
         if (template == null) {
             throw new NotFoundException("workflow template not found");
@@ -210,13 +206,15 @@ public class WorkflowService {
         WorkflowConfig config = parseConfig(pick(template, "config_json", "configJson"));
         validateConfig(config);
 
-        WorkflowNode node = resolveNode(config, recordId, request);
+        long instanceId = toLong(pick(instance, "id"), 0L);
+        WorkflowNode node = resolveNode(config, instanceId, request);
         if (node == null) {
             throw new BadRequestException("no active node");
         }
-        Long taskId = resolveTaskId(recordId, node, request);
+
+        Long taskId = resolveTaskId(instanceId, node, operator);
         if (taskId == null) {
-            throw new BadRequestException("no pending task");
+            throw new BadRequestException("no pending task for operator");
         }
         int done = workflowMapper.completeTask(taskId, "approve", request == null ? null : request.getComment(), operator);
         if (done == 0) {
@@ -225,19 +223,19 @@ public class WorkflowService {
 
         boolean nodeCompleted;
         if ("any".equals(nodeMode(node))) {
-            workflowMapper.cancelPendingTasks(recordId, node.getCode());
+            workflowMapper.cancelPendingTasks(instanceId, node.getCode());
             nodeCompleted = true;
         } else {
-            nodeCompleted = workflowMapper.countPendingTasks(recordId, node.getCode()) == 0;
+            nodeCompleted = workflowMapper.countPendingTasks(instanceId, node.getCode()) == 0;
         }
 
-        workflowMapper.touchRecord(recordId, pageCode, operator);
         if (nodeCompleted) {
-            WorkflowNode next = nextNode(config, node.getCode());
-            if (next != null) {
-                createTasks(recordId, pageCode, toLongObj(pick(template, "id")), templateCode, next, null);
+            WorkflowNode nextNode = nextNode(config, node.getCode());
+            if (nextNode != null) {
+                createTasks(instanceId, recordId, pageCode, toLongObj(pick(template, "id")), templateCode, nextNode, null);
+                workflowMapper.updateInstanceCurrentNode(instanceId, nextNode.getCode());
             } else {
-                workflowMapper.updateRecordStatus(recordId, pageCode, "approved", operator);
+                workflowMapper.completeInstance(instanceId, "approved");
             }
         }
         return 1;
@@ -247,15 +245,9 @@ public class WorkflowService {
     public int reject(String pageCode, UUID recordId, WorkflowActionRequest request) {
         validatePageCode(pageCode);
         String operator = requireOperator(request);
-        Map<String, Object> record = requireRecord(recordId, pageCode);
-        if (!"submitted".equalsIgnoreCase(str(pick(record, "status")))) {
-            throw new BadRequestException("record is not in submitted status");
-        }
+        Map<String, Object> instance = requireActiveInstance(recordId, pageCode);
 
-        String templateCode = str(pick(record, "workflow_template_code", "workflowTemplateCode"));
-        if (isBlank(templateCode)) {
-            throw new BadRequestException("record workflow template not found");
-        }
+        String templateCode = str(pick(instance, "template_code", "templateCode"));
         Map<String, Object> template = workflowMapper.getTemplate(pageCode, templateCode);
         if (template == null) {
             throw new NotFoundException("workflow template not found");
@@ -263,21 +255,23 @@ public class WorkflowService {
         WorkflowConfig config = parseConfig(pick(template, "config_json", "configJson"));
         validateConfig(config);
 
-        WorkflowNode node = resolveNode(config, recordId, request);
+        long instanceId = toLong(pick(instance, "id"), 0L);
+        WorkflowNode node = resolveNode(config, instanceId, request);
         if (node == null) {
             throw new BadRequestException("no active node");
         }
-        Long taskId = resolveTaskId(recordId, node, request);
+        Long taskId = resolveTaskId(instanceId, node, operator);
         if (taskId == null) {
-            throw new BadRequestException("no pending task");
+            throw new BadRequestException("no pending task for operator");
         }
 
         int done = workflowMapper.completeTask(taskId, "reject", request == null ? null : request.getComment(), operator);
         if (done == 0) {
             throw new BadRequestException("task already processed");
         }
-        workflowMapper.cancelAllPendingTasks(recordId);
-        return workflowMapper.updateRecordStatus(recordId, pageCode, "rejected", operator);
+        workflowMapper.cancelAllPendingTasks(instanceId);
+        workflowMapper.completeInstance(instanceId, "rejected");
+        return 1;
     }
 
     public PageResult<Map<String, Object>> queryTodo(WorkflowTodoQueryRequest request) {
@@ -296,11 +290,11 @@ public class WorkflowService {
 
         Long total = workflowMapper.countTodo(assignee, pageCode, keywords);
         List<Map<String, Object>> rows = workflowMapper.queryTodo(assignee, pageCode, keywords, pageSize, offset);
-
         List<Map<String, Object>> items = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("taskId", pick(row, "task_id", "taskId"));
+            item.put("instanceId", pick(row, "instance_id", "instanceId"));
             item.put("recordId", pick(row, "record_id", "recordId"));
             item.put("pageCode", str(pick(row, "page_code", "pageCode")));
             item.put("templateCode", str(pick(row, "template_code", "templateCode")));
@@ -310,11 +304,13 @@ public class WorkflowService {
             item.put("taskStatus", str(pick(row, "task_status", "taskStatus")));
             item.put("action", str(pick(row, "action")));
             item.put("comment", str(pick(row, "comment")));
-            item.put("recordStatus", str(pick(row, "record_status", "recordStatus")));
+            item.put("workflowStatus", str(pick(row, "workflow_status", "workflowStatus")));
+            item.put("currentNodeCode", str(pick(row, "current_node_code", "currentNodeCode")));
+            item.put("starter", str(pick(row, "starter")));
+            item.put("startedAt", pick(row, "started_at", "startedAt"));
+            item.put("finishedAt", pick(row, "finished_at", "finishedAt"));
             item.put("createdAt", pick(row, "task_created_at", "taskCreatedAt"));
             item.put("updatedAt", pick(row, "task_updated_at", "taskUpdatedAt"));
-            item.put("createdBy", str(pick(row, "created_by", "createdBy")));
-            item.put("data", jsonHelper.toMap(pick(row, "data")));
             items.add(item);
         }
         return new PageResult<>(items, total == null ? 0 : total, page, pageSize);
@@ -336,11 +332,11 @@ public class WorkflowService {
 
         Long total = workflowMapper.countDone(operator, pageCode, keywords);
         List<Map<String, Object>> rows = workflowMapper.queryDone(operator, pageCode, keywords, pageSize, offset);
-
         List<Map<String, Object>> items = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("taskId", pick(row, "task_id", "taskId"));
+            item.put("instanceId", pick(row, "instance_id", "instanceId"));
             item.put("recordId", pick(row, "record_id", "recordId"));
             item.put("pageCode", str(pick(row, "page_code", "pageCode")));
             item.put("templateCode", str(pick(row, "template_code", "templateCode")));
@@ -351,11 +347,13 @@ public class WorkflowService {
             item.put("action", str(pick(row, "action")));
             item.put("comment", str(pick(row, "comment")));
             item.put("operator", str(pick(row, "operated_by", "operatedBy")));
-            item.put("recordStatus", str(pick(row, "record_status", "recordStatus")));
+            item.put("workflowStatus", str(pick(row, "workflow_status", "workflowStatus")));
+            item.put("currentNodeCode", str(pick(row, "current_node_code", "currentNodeCode")));
+            item.put("starter", str(pick(row, "starter")));
+            item.put("startedAt", pick(row, "started_at", "startedAt"));
+            item.put("finishedAt", pick(row, "finished_at", "finishedAt"));
             item.put("createdAt", pick(row, "task_created_at", "taskCreatedAt"));
             item.put("updatedAt", pick(row, "task_updated_at", "taskUpdatedAt"));
-            item.put("createdBy", str(pick(row, "created_by", "createdBy")));
-            item.put("data", jsonHelper.toMap(pick(row, "data")));
             items.add(item);
         }
         return new PageResult<>(items, total == null ? 0 : total, page, pageSize);
@@ -371,7 +369,7 @@ public class WorkflowService {
             validatePageCode(pageCode);
         }
         String status = trimToNull(request.getStatus());
-        if (status != null && !isValidRecordStatus(status)) {
+        if (status != null && !isValidWorkflowStatus(status)) {
             throw new BadRequestException("invalid status");
         }
         String keywords = trimToNull(request.getKeywords());
@@ -381,20 +379,21 @@ public class WorkflowService {
 
         Long total = workflowMapper.countMyApply(operator, pageCode, status, keywords);
         List<Map<String, Object>> rows = workflowMapper.queryMyApply(operator, pageCode, status, keywords, pageSize, offset);
-
         List<Map<String, Object>> items = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> item = new LinkedHashMap<>();
+            item.put("instanceId", pick(row, "instance_id", "instanceId"));
             item.put("recordId", pick(row, "record_id", "recordId"));
             item.put("pageCode", str(pick(row, "page_code", "pageCode")));
-            item.put("recordStatus", str(pick(row, "record_status", "recordStatus")));
+            item.put("workflowStatus", str(pick(row, "workflow_status", "workflowStatus")));
             item.put("templateCode", str(pick(row, "template_code", "templateCode")));
             item.put("templateName", str(pick(row, "template_name", "templateName")));
-            item.put("currentNode", str(pick(row, "pending_node_code", "pendingNodeCode")));
+            item.put("currentNodeCode", str(pick(row, "current_node_code", "currentNodeCode")));
             item.put("pendingAssignees", splitAssignees(str(pick(row, "pending_assignees", "pendingAssignees"))));
-            item.put("createdAt", pick(row, "record_created_at", "recordCreatedAt"));
-            item.put("updatedAt", pick(row, "record_updated_at", "recordUpdatedAt"));
-            item.put("data", jsonHelper.toMap(pick(row, "data")));
+            item.put("starter", str(pick(row, "starter")));
+            item.put("startedAt", pick(row, "started_at", "startedAt"));
+            item.put("finishedAt", pick(row, "finished_at", "finishedAt"));
+            item.put("updatedAt", pick(row, "updated_at", "updatedAt"));
             items.add(item);
         }
         return new PageResult<>(items, total == null ? 0 : total, page, pageSize);
@@ -406,24 +405,35 @@ public class WorkflowService {
         }
         String pageCode = request.getPageCode().trim();
         validatePageCode(pageCode);
-        Map<String, Object> record = requireRecord(request.getRecordId(), pageCode);
+        requireRecord(request.getRecordId(), pageCode);
 
-        Map<String, Object> recordView = new LinkedHashMap<>();
-        recordView.put("id", pick(record, "id"));
-        recordView.put("pageCode", str(pick(record, "page_code", "pageCode")));
-        recordView.put("status", str(pick(record, "status")));
-        recordView.put("templateCode", str(pick(record, "workflow_template_code", "workflowTemplateCode")));
-        recordView.put("createdAt", pick(record, "created_at", "createdAt"));
-        recordView.put("updatedAt", pick(record, "updated_at", "updatedAt"));
-        recordView.put("createdBy", str(pick(record, "created_by", "createdBy")));
-        recordView.put("updatedBy", str(pick(record, "updated_by", "updatedBy")));
-        recordView.put("data", jsonHelper.toMap(pick(record, "data")));
+        Map<String, Object> instance = workflowMapper.getLatestInstance(request.getRecordId(), pageCode);
+        if (instance == null) {
+            throw new NotFoundException("workflow instance not found");
+        }
+        long instanceId = toLong(pick(instance, "id"), 0L);
 
-        List<Map<String, Object>> rows = workflowMapper.listTimeline(request.getRecordId(), pageCode);
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("recordId", request.getRecordId());
+        record.put("pageCode", pageCode);
+
+        Map<String, Object> instanceInfo = new LinkedHashMap<>();
+        instanceInfo.put("instanceId", pick(instance, "id"));
+        instanceInfo.put("templateCode", str(pick(instance, "template_code", "templateCode")));
+        instanceInfo.put("templateName", str(pick(instance, "template_name", "templateName")));
+        instanceInfo.put("workflowStatus", str(pick(instance, "status")));
+        instanceInfo.put("currentNodeCode", str(pick(instance, "current_node_code", "currentNodeCode")));
+        instanceInfo.put("starter", str(pick(instance, "starter")));
+        instanceInfo.put("startedAt", pick(instance, "started_at", "startedAt"));
+        instanceInfo.put("finishedAt", pick(instance, "finished_at", "finishedAt"));
+        instanceInfo.put("updatedAt", pick(instance, "updated_at", "updatedAt"));
+
+        List<Map<String, Object>> rows = workflowMapper.listTimelineByInstance(instanceId);
         List<Map<String, Object>> timeline = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("taskId", pick(row, "task_id", "taskId"));
+            item.put("instanceId", pick(row, "instance_id", "instanceId"));
             item.put("recordId", pick(row, "record_id", "recordId"));
             item.put("pageCode", str(pick(row, "page_code", "pageCode")));
             item.put("templateCode", str(pick(row, "template_code", "templateCode")));
@@ -440,7 +450,8 @@ public class WorkflowService {
         }
 
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("record", recordView);
+        data.put("record", record);
+        data.put("instance", instanceInfo);
         data.put("timeline", timeline);
         return data;
     }
@@ -466,6 +477,14 @@ public class WorkflowService {
             throw new NotFoundException("record not found");
         }
         return record;
+    }
+
+    private Map<String, Object> requireActiveInstance(UUID recordId, String pageCode) {
+        Map<String, Object> instance = workflowMapper.getActiveInstance(recordId, pageCode);
+        if (instance == null) {
+            throw new BadRequestException("no active workflow instance");
+        }
+        return instance;
     }
 
     private void validatePageCode(String pageCode) {
@@ -515,24 +534,33 @@ public class WorkflowService {
         }
     }
 
-    private WorkflowNode resolveNode(WorkflowConfig config, UUID recordId, WorkflowActionRequest request) {
+    private WorkflowNode resolveNode(WorkflowConfig config, long instanceId, WorkflowActionRequest request) {
         String nodeCode = request == null ? null : trimToNull(request.getNodeCode());
         String operator = request == null ? null : trimToNull(request.getOperator());
+
         if (nodeCode == null && operator != null) {
-            Long taskId = workflowMapper.findPendingTaskIdByRecordAndAssignee(recordId, operator);
+            Long taskId = workflowMapper.findPendingTaskIdByInstanceAndAssignee(instanceId, operator);
             if (taskId != null) {
                 nodeCode = workflowMapper.getTaskNodeCode(taskId);
             }
         }
         if (nodeCode == null) {
             for (WorkflowNode node : config.getNodes()) {
-                if (workflowMapper.countPendingTasks(recordId, node.getCode()) > 0) {
+                if (workflowMapper.countPendingTasks(instanceId, node.getCode()) > 0) {
                     nodeCode = node.getCode();
                     break;
                 }
             }
         }
         return findNode(config, nodeCode);
+    }
+
+    private Long resolveTaskId(long instanceId, WorkflowNode node, String operator) {
+        Long taskId = workflowMapper.findPendingTaskIdByAssignee(instanceId, node.getCode(), operator);
+        if (taskId != null) {
+            return taskId;
+        }
+        return workflowMapper.findPendingUnassignedTaskId(instanceId, node.getCode());
     }
 
     private WorkflowNode findNode(WorkflowConfig config, String nodeCode) {
@@ -560,29 +588,22 @@ public class WorkflowService {
         return null;
     }
 
-    private Long resolveTaskId(UUID recordId, WorkflowNode node, WorkflowActionRequest request) {
-        String operator = request == null ? null : trimToNull(request.getOperator());
-        String assignee = operator != null ? operator : (request == null ? null : trimToNull(request.getAssignee()));
-        if (assignee != null) {
-            Long id = workflowMapper.findPendingTaskIdByAssignee(recordId, node.getCode(), assignee);
-            if (id != null) {
-                return id;
-            }
-        }
-        List<Long> ids = workflowMapper.findPendingTaskIds(recordId, node.getCode());
-        return ids.isEmpty() ? null : ids.get(0);
-    }
-
-    private void createTasks(UUID recordId, String pageCode, Long templateId, String templateCode, WorkflowNode node, String fallbackAssignee) {
+    private void createTasks(long instanceId,
+                             UUID recordId,
+                             String pageCode,
+                             Long templateId,
+                             String templateCode,
+                             WorkflowNode node,
+                             String fallbackAssignee) {
         List<String> assignees = node.getAssignees() == null ? new ArrayList<>() : node.getAssignees();
         if (assignees.isEmpty()) {
-            String assignee = trimToNull(fallbackAssignee);
-            workflowMapper.insertTask(recordId, pageCode, templateId, templateCode, node.getCode(), assignee, "pending", "pending", null, null);
+            workflowMapper.insertTask(instanceId, recordId, pageCode, templateId, templateCode, node.getCode(),
+                trimToNull(fallbackAssignee), "pending", "pending", null, null);
             return;
         }
         for (String assignee : assignees) {
-            String safeAssignee = trimToNull(assignee);
-            workflowMapper.insertTask(recordId, pageCode, templateId, templateCode, node.getCode(), safeAssignee, "pending", "pending", null, null);
+            workflowMapper.insertTask(instanceId, recordId, pageCode, templateId, templateCode, node.getCode(),
+                trimToNull(assignee), "pending", "pending", null, null);
         }
     }
 
@@ -615,8 +636,8 @@ public class WorkflowService {
         return pageSize;
     }
 
-    private boolean isValidRecordStatus(String status) {
-        return "draft".equals(status) || "submitted".equals(status) || "approved".equals(status) || "rejected".equals(status);
+    private boolean isValidWorkflowStatus(String status) {
+        return "submitted".equals(status) || "approved".equals(status) || "rejected".equals(status);
     }
 
     private List<String> splitAssignees(String value) {

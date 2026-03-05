@@ -21,6 +21,13 @@
     DELETE FROM data_record WHERE id = #{id} AND page_code = #{pageCode}
   </delete>
 
+  <select id="getRecord" resultType="map">
+    SELECT id, status, created_at, updated_at, created_by, updated_by, data
+    FROM data_record
+    WHERE id = #{id} AND page_code = #{pageCode}
+    LIMIT 1
+  </select>
+
   <select id="query" resultType="map">
     ${sql}
   </select>

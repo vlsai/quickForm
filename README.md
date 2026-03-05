@@ -26,6 +26,7 @@ mvn spring-boot:run
 - `/data/{pageCode}/create`
 - `/data/{pageCode}/{id}/update`
 - `/data/{pageCode}/{id}/delete`
+- `/data/{pageCode}/{id}/get`
 
 ### Workflow
 - `/workflow/template/list`
@@ -108,3 +109,7 @@ mvn spring-boot:run
 - 报表 SQL 里的 `:param` 会自动转换为 MyBatis 绑定参数。
 
 说明：后端不维护页面信息，`pageCode` 由前端固定传入并作为数据/流程/报表分组键。
+
+补充：
+- 工作流状态已从 `data_record` 解耦，流程运行状态存放在 `workflow_instance`。
+- 工作流待办/已办/我发起接口只返回流程域字段；业务 JSON 数据通过 `Data` 接口单独查询展示。

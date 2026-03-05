@@ -44,25 +44,25 @@
 
 ## 3. 数据模型设计（PostgreSQL）
 
-> 说明：以下为目标结构；用于替代当前“单流程配置”模型。
+> 当前实现采用“数据域”和“流程域”彻底分离：
+> - 业务数据在 `data_record`（JSONB）
+> - 流程运行状态在 `workflow_instance + workflow_task`
+> - 不再把流程状态写入 `data_record` 的流程专用字段
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 业务数据
 CREATE TABLE IF NOT EXISTS data_record (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   page_code TEXT NOT NULL,
   data JSONB NOT NULL DEFAULT '{}'::jsonb,
-  status TEXT NOT NULL DEFAULT 'draft', -- draft/submitted/approved/rejected
-  workflow_template_code TEXT,          -- 发起时选中的模板
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'submitted', 'approved', 'rejected')),
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by TEXT,
   updated_by TEXT
 );
 
--- 流程模板（同一 page_code 多模板）
 CREATE TABLE IF NOT EXISTS workflow_template (
   id BIGSERIAL PRIMARY KEY,
   page_code TEXT NOT NULL,
@@ -75,24 +75,37 @@ CREATE TABLE IF NOT EXISTS workflow_template (
   UNIQUE (page_code, template_code)
 );
 
--- 审批任务
+CREATE TABLE IF NOT EXISTS workflow_instance (
+  id BIGSERIAL PRIMARY KEY,
+  page_code TEXT NOT NULL,
+  template_id BIGINT REFERENCES workflow_template(id),
+  record_id UUID NOT NULL REFERENCES data_record(id),
+  template_code TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'approved', 'rejected')),
+  current_node_code TEXT,
+  starter TEXT,
+  started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  finished_at TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS workflow_task (
   id BIGSERIAL PRIMARY KEY,
-  record_id UUID NOT NULL REFERENCES data_record(id),
+  instance_id BIGINT NOT NULL REFERENCES workflow_instance(id),
   page_code TEXT NOT NULL,
+  record_id UUID NOT NULL REFERENCES data_record(id),
   template_id BIGINT REFERENCES workflow_template(id),
   template_code TEXT NOT NULL,
   node_code TEXT NOT NULL,
   assignee TEXT,
-  status TEXT NOT NULL, -- pending/done/cancelled
-  action TEXT NOT NULL, -- pending/approve/reject/skip
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'cancelled')),
+  action TEXT NOT NULL DEFAULT 'pending' CHECK (action IN ('pending', 'approve', 'reject', 'skip')),
   comment TEXT,
+  operated_by TEXT,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  operated_by TEXT
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- 报表
 CREATE TABLE IF NOT EXISTS report (
   id BIGSERIAL PRIMARY KEY,
   page_code TEXT NOT NULL,
@@ -102,20 +115,27 @@ CREATE TABLE IF NOT EXISTS report (
 );
 ```
 
-### 3.1 索引建议
+### 3.1 索引与唯一约束
 
 ```sql
 CREATE INDEX IF NOT EXISTS idx_data_page ON data_record(page_code);
 CREATE INDEX IF NOT EXISTS idx_data_status ON data_record(status);
 CREATE INDEX IF NOT EXISTS idx_data_creator ON data_record(created_by);
-CREATE INDEX IF NOT EXISTS idx_data_template ON data_record(page_code, workflow_template_code);
 CREATE INDEX IF NOT EXISTS idx_data_gin ON data_record USING GIN (data);
 
-CREATE INDEX IF NOT EXISTS idx_tpl_page_enabled ON workflow_template(page_code, enabled);
-CREATE INDEX IF NOT EXISTS idx_tpl_page_default ON workflow_template(page_code, is_default);
+CREATE INDEX IF NOT EXISTS idx_workflow_template_page ON workflow_template(page_code);
+CREATE INDEX IF NOT EXISTS idx_workflow_template_default ON workflow_template(page_code, is_default);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_workflow_template_default_page
+  ON workflow_template(page_code) WHERE is_default = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_instance_record ON workflow_instance(record_id, page_code);
+CREATE INDEX IF NOT EXISTS idx_workflow_instance_starter ON workflow_instance(starter, page_code, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_workflow_instance_active_record
+  ON workflow_instance(page_code, record_id) WHERE status = 'submitted';
 
 CREATE INDEX IF NOT EXISTS idx_task_todo ON workflow_task(assignee, status, page_code, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_task_record ON workflow_task(record_id, node_code, status);
+CREATE INDEX IF NOT EXISTS idx_task_record_node_status ON workflow_task(record_id, node_code, status);
+CREATE INDEX IF NOT EXISTS idx_task_instance_node_status ON workflow_task(instance_id, node_code, status);
 CREATE INDEX IF NOT EXISTS idx_task_template ON workflow_task(page_code, template_code);
 CREATE INDEX IF NOT EXISTS idx_task_operated ON workflow_task(operated_by, action, updated_at DESC);
 
@@ -214,15 +234,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_report_page_code ON report(page_code);
 
 返回字段建议：
 - `taskId`
+- `instanceId`
 - `recordId`
 - `pageCode`
 - `templateCode`
 - `templateName`
 - `nodeCode`
-- `nodeName`
 - `taskStatus`
-- `recordStatus`
-- `data`
+- `workflowStatus`
+- `currentNodeCode`
 - `createdAt`
 
 ## 5.4 通用数据接口（保持）
@@ -230,20 +250,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_report_page_code ON report(page_code);
 - `POST /data/{pageCode}/create`
 - `POST /data/{pageCode}/{id}/update`
 - `POST /data/{pageCode}/{id}/delete`
+- `POST /data/{pageCode}/{id}/get`
 
 ## 6. 状态机设计
 
-## 6.1 业务单据状态（`data_record.status`）
+## 6.1 业务数据状态（`data_record.status`）
 - `draft`
 - `submitted`
 - `approved`
 - `rejected`
 
+说明：
+- 该字段属于业务数据域，后端通用数据接口可读写。
+- 工作流不再强制驱动该字段流转（数据展示页面与工作流页面职责分离）。
+
+## 6.2 流程实例状态（`workflow_instance.status`）
+- `submitted`
+- `approved`
+- `rejected`
+
 流转：
-- `draft|rejected -> submitted`
 - `submitted -> approved|rejected`
 
-## 6.2 审批任务状态（`workflow_task.status + action`）
+## 6.3 审批任务状态（`workflow_task.status + action`）
 - `pending + pending`
 - `done + approve`
 - `done + reject`
@@ -288,22 +317,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_report_page_code ON report(page_code);
 6. B approve（L1 完成，进入 L2）
 7. 生成 C、D 两条 `pending`
 8. C approve（D 自动 `cancelled/skip`）
-9. 单据 `approved`
+9. `workflow_instance.status = approved`
 
-## 10. 与当前实现的差距与改造项
+## 10. 当前实现结果
 
-当前实现已具备：
-- `page_code + JSONB` 数据模型
-- 多节点/多审批人能力
-- `mode=all/any` 推进逻辑
-- 报表按 `pageCode` 从库取 SQL，且每个 `pageCode` 一条 SQL
-
-需改造：
-- 单流程表 `workflow` 改为多模板 `workflow_template`
-- `submit` 增加模板选择（`templateCode`）
-- 原 `/workflow/tasks` 下线
-- 新增固定审批中心查询接口（`todo/done/my-apply/timeline`）
-- 审批动作补事务与幂等保护
+- 数据与流程已解耦：流程状态落 `workflow_instance`，业务 JSON 仍在 `data_record`。
+- 审批中心接口固定：`todo/done/my-apply/timeline`，不依赖报表 SQL。
+- 支持多模板发起与 `all/any` 审批语义。
+- 报表改为按 `pageCode` 从 `report.sql_text` 获取 SQL 执行。
+- 每个 `pageCode` 限定 1 条报表 SQL（唯一约束）。
 
 ## 11. 验收标准
 

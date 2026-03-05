@@ -21,6 +21,8 @@ public interface DataMapper {
 
     int deleteRecord(@Param("id") UUID id, @Param("pageCode") String pageCode);
 
+    Map<String, Object> getRecord(@Param("id") UUID id, @Param("pageCode") String pageCode);
+
     List<Map<String, Object>> query(@Param("sql") String sql, @Param("params") Map<String, Object> params);
 
     Long count(@Param("sql") String sql, @Param("params") Map<String, Object> params);

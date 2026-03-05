@@ -51,4 +51,12 @@ public class DataController {
     ) {
         return ApiResponse.ok(dataService.delete(pageCode, id));
     }
+
+    @PostMapping("/{pageCode}/{id}/get")
+    public ApiResponse<Map<String, Object>> get(
+        @PathVariable String pageCode,
+        @PathVariable UUID id
+    ) {
+        return ApiResponse.ok(dataService.get(pageCode, id));
+    }
 }

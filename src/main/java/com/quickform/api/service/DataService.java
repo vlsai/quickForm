@@ -2,6 +2,7 @@ package com.quickform.api.service;
 
 import com.quickform.api.dto.*;
 import com.quickform.api.exception.BadRequestException;
+import com.quickform.api.exception.NotFoundException;
 import com.quickform.api.mapper.DataMapper;
 import org.springframework.stereotype.Service;
 
@@ -66,6 +67,23 @@ public class DataService {
     public int delete(String pageCode, UUID id) {
         validatePageCode(pageCode);
         return dataMapper.deleteRecord(id, pageCode);
+    }
+
+    public Map<String, Object> get(String pageCode, UUID id) {
+        validatePageCode(pageCode);
+        Map<String, Object> row = dataMapper.getRecord(id, pageCode);
+        if (row == null) {
+            throw new NotFoundException("record not found");
+        }
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", row.get("id"));
+        item.put("status", row.get("status"));
+        item.put("createdAt", row.get("created_at"));
+        item.put("updatedAt", row.get("updated_at"));
+        item.put("createdBy", row.get("created_by"));
+        item.put("updatedBy", row.get("updated_by"));
+        item.put("data", jsonHelper.toMap(row.get("data")));
+        return item;
     }
 
     private void validatePageCode(String pageCode) {
