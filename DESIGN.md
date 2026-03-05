@@ -1,6 +1,9 @@
 # QuickForm 后端设计（当前实现）
 
-详细方案请见：
+详细设计文档请见：
+- `docs/quickform-backend-detailed-design.md`
+
+设计演进过程文档请见：
 - `docs/plans/2026-03-06-workflow-multi-template-design.md`
 
 当前实现核心：
