@@ -78,11 +78,15 @@ mvn spring-boot:run
 
 ```json
 {
-  "sql": "SELECT data->>'name' AS name, COUNT(1) AS cnt FROM data_record WHERE page_code = :pageCode GROUP BY name",
-  "params": {"pageCode": "customer"}
+  "pageCode": "customer",
+  "reportName": "customer-summary",
+  "params": {"status": "approved"}
 }
 ```
 
-说明：报表 SQL 支持 `:param` 命名参数（自动转换为 MyBatis 绑定）。
+说明：
+- 前端不传 SQL，后端按 `pageCode`（可选 `reportName`/`reportId`）从 `report` 表读取 `sql_text` 后执行。
+- 若只传 `pageCode`，默认执行该页面最新一条报表配置。
+- 报表 SQL 里的 `:param` 会自动转换为 MyBatis 绑定参数。
 
 说明：后端不维护页面信息，`pageCode` 由前端固定传入并作为数据/流程/报表分组键。

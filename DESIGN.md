@@ -109,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_task_record_node_status ON workflow_task(record_i
 
 | 接口 | 功能 |
 |---|---|
-| `/report/run` | 执行 SQL 报表 |
+| `/report/run` | 按 `page_code` 读取 SQL 并执行报表 |
 
 ## 5. 查询表达式
 
@@ -187,6 +187,15 @@ src/main/resources
 - 不提供 `/page/*` 管理接口。
 - 后端不会校验 `page_code` 是否存在于页面表。
 - 仅校验格式：`[a-zA-Z0-9_-]+`。
+
+## 10. 报表执行约定
+
+- 前端调用 `/report/run` 只需传 `pageCode`（可选 `reportName` 或 `reportId`）。
+- 后端从 `report` 表查询 `sql_text` 再执行。
+- 查询优先级：
+  1. `reportId`
+  2. `pageCode + reportName`
+  3. `pageCode` 最新一条
 
 ---
 
