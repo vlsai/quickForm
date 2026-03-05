@@ -45,7 +45,6 @@ CREATE TABLE IF NOT EXISTS report (
   page_code TEXT NOT NULL,
   name TEXT NOT NULL,
   sql_text TEXT NOT NULL,
-  UNIQUE (page_code, name),
   options JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
@@ -56,6 +55,7 @@ ALTER TABLE workflow_task ADD COLUMN IF NOT EXISTS operated_by TEXT;
 ALTER TABLE workflow_task ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
 UPDATE workflow_task SET template_code = COALESCE(template_code, 'legacy') WHERE template_code IS NULL;
 ALTER TABLE workflow_task ALTER COLUMN template_code SET NOT NULL;
+ALTER TABLE report DROP CONSTRAINT IF EXISTS report_page_code_name_key;
 
 CREATE INDEX IF NOT EXISTS idx_data_page ON data_record(page_code);
 CREATE INDEX IF NOT EXISTS idx_data_gin ON data_record USING GIN (data);
@@ -65,6 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_data_template ON data_record(page_code, workflow_
 CREATE INDEX IF NOT EXISTS idx_workflow_template_page ON workflow_template(page_code);
 CREATE INDEX IF NOT EXISTS idx_workflow_template_default ON workflow_template(page_code, is_default);
 CREATE INDEX IF NOT EXISTS idx_report_page ON report(page_code);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_report_page_code ON report(page_code);
 CREATE INDEX IF NOT EXISTS idx_task_todo ON workflow_task(assignee, status, page_code, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_task_record_node_status ON workflow_task(record_id, node_code, status);
 CREATE INDEX IF NOT EXISTS idx_task_template ON workflow_task(page_code, template_code);

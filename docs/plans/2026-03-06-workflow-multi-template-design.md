@@ -98,8 +98,7 @@ CREATE TABLE IF NOT EXISTS report (
   page_code TEXT NOT NULL,
   name TEXT NOT NULL,
   sql_text TEXT NOT NULL,
-  options JSONB NOT NULL DEFAULT '{}'::jsonb,
-  UNIQUE (page_code, name)
+  options JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 ```
 
@@ -121,6 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_task_template ON workflow_task(page_code, templat
 CREATE INDEX IF NOT EXISTS idx_task_operated ON workflow_task(operated_by, action, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_report_page ON report(page_code);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_report_page_code ON report(page_code);
 ```
 
 ## 4. 流程配置模型
@@ -296,7 +296,7 @@ CREATE INDEX IF NOT EXISTS idx_report_page ON report(page_code);
 - `page_code + JSONB` 数据模型
 - 多节点/多审批人能力
 - `mode=all/any` 推进逻辑
-- 报表按 `pageCode` 从库取 SQL
+- 报表按 `pageCode` 从库取 SQL，且每个 `pageCode` 一条 SQL
 
 需改造：
 - 单流程表 `workflow` 改为多模板 `workflow_template`
@@ -313,4 +313,3 @@ CREATE INDEX IF NOT EXISTS idx_report_page ON report(page_code);
 - 固定审批中心不依赖报表接口。
 - 所有接口均为 POST。
 - 并发场景无重复审批成功问题。
-

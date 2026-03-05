@@ -98,14 +98,13 @@ mvn spring-boot:run
 ```json
 {
   "pageCode": "customer",
-  "reportName": "customer-summary",
   "params": {"status": "approved"}
 }
 ```
 
 说明：
-- 前端不传 SQL，后端按 `pageCode`（可选 `reportName`/`reportId`）从 `report` 表读取 `sql_text` 后执行。
-- 若只传 `pageCode`，默认执行该页面最新一条报表配置。
+- 前端不传 SQL，后端按 `pageCode` 从 `report` 表读取 `sql_text` 后执行。
+- 每个 `pageCode` 仅允许一条报表 SQL（数据库唯一约束）。
 - 报表 SQL 里的 `:param` 会自动转换为 MyBatis 绑定参数。
 
 说明：后端不维护页面信息，`pageCode` 由前端固定传入并作为数据/流程/报表分组键。

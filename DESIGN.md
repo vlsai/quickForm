@@ -9,6 +9,7 @@
 - 流程：同一 `page_code` 支持多个 `workflow_template`
 - 审批中心：固定接口 `todo/done/my-apply/timeline`，不依赖报表
 - 报表：`/report/run` 按 `pageCode` 从 `report.sql_text` 取 SQL 执行
+- 报表约束：每个 `page_code` 仅一条 SQL（`report.page_code` 唯一）
 - 所有接口均为 `POST`
 
 主要接口：

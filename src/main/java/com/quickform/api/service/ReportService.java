@@ -30,7 +30,7 @@ public class ReportService {
             throw new BadRequestException("invalid pageCode");
         }
 
-        Map<String, Object> report = resolveReport(request);
+        Map<String, Object> report = reportMapper.getReportByPage(request.getPageCode());
         if (report == null) {
             throw new NotFoundException("report config not found");
         }
@@ -45,16 +45,6 @@ public class ReportService {
         Map<String, Object> params = request.getParams() == null ? Collections.emptyMap() : request.getParams();
         String sql = convertNamedParams(sqlObj.toString());
         return reportMapper.run(sql, params);
-    }
-
-    private Map<String, Object> resolveReport(ReportRunRequest request) {
-        if (request.getReportId() != null) {
-            return reportMapper.getReportById(request.getReportId());
-        }
-        if (request.getReportName() != null && !request.getReportName().isBlank()) {
-            return reportMapper.getReportByPageAndName(request.getPageCode(), request.getReportName());
-        }
-        return reportMapper.getLatestReportByPage(request.getPageCode());
     }
 
     private String convertNamedParams(String sql) {
